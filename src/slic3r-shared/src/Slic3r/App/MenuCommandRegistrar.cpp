@@ -2324,7 +2324,8 @@ void MenuCommandRegistrar::register_main_menu_plugin_commands(Lua::PluginSystem&
         plugin_system.plugins()
             | std::views::values
             | std::views::filter(
-                [](const auto& plugin) { return plugin.meta().type != Lua::PluginType::PrintMode; }
+                // Only project plugins are user invoked; the others hook into the pipeline.
+                [](const auto& plugin) { return plugin.meta().type == Lua::PluginType::ProjectPlugin; }
             ),
         std::back_inserter(entries),
         [](const auto& p) -> std::tuple<std::string, std::vector<std::string>>

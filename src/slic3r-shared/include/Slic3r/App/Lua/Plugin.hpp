@@ -17,7 +17,8 @@ namespace Slic3r::App::Lua {
 enum class PluginType
 {
     ProjectPlugin,
-    PrintMode
+    PrintMode,
+    SlicingIslandOrder
 };
 
 tl::expected<PluginType, std::string> parse_plugin_type(std::string_view s);
@@ -56,6 +57,13 @@ public:
     PluginMeta& meta() { return m_meta; }
     const std::string& path() const { return m_path; }
     const std::string& bundle_id() const { return m_bundle_id; }
+
+    /**
+     * @brief Loads the plugin chunk into @p lua with the file sandbox in place.
+     *
+     * Leaves the plugin's globals (@c info and its entry point) defined in @p lua.
+     */
+    void load(Biz::Lua::LuaEngine& lua) const;
 
     sol::object execute(Biz::Lua::LuaEngine& lua, const PluginParamValueMap& params) const;
 

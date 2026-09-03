@@ -24,6 +24,7 @@ enum class PluginApiType
 {
     Project,
     PrintMode,
+    SlicingIslandOrder
 };
 
 std::string to_string(PluginApiType pat);

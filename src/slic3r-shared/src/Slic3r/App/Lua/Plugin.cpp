@@ -19,7 +19,15 @@ namespace fs = boost::filesystem;
 namespace {
 const std::unordered_map<PluginType, std::string> PLUGIN_TYPE_NAMES = {
     {PluginType::ProjectPlugin, "project.plugin"},
-    {PluginType::PrintMode, "print.print_mode"}
+    {PluginType::PrintMode, "print.print_mode"},
+    {PluginType::SlicingIslandOrder, "slicing.island_order"}
+};
+
+// The global each plugin type has to define to be usable.
+const std::unordered_map<PluginType, std::string> PLUGIN_ENTRY_POINTS = {
+    {PluginType::ProjectPlugin, "execute"},
+    {PluginType::PrintMode, "execute"},
+    {PluginType::SlicingIslandOrder, "order_islands"}
 };
 }
 
@@ -165,8 +173,9 @@ Plugin::parse(Biz::Lua::LuaEngine& lua, const std::string& bundle_id, const std:
         }
     }
 
-    if (!state["execute"].is<sol::function>()) {
-        return tl::unexpected{"Missing execute() function"};
+    const std::string& entry_point = PLUGIN_ENTRY_POINTS.at(meta.type);
+    if (!state[entry_point].is<sol::function>()) {
+        return tl::unexpected{fmt::format("Missing {}() function", entry_point)};
     }
 
     return Plugin{path, bundle_id, meta};
@@ -178,7 +187,7 @@ Plugin::Plugin(std::string path, std::string bundle_id, PluginMeta meta) :
     m_meta(std::move(meta))
 {}
 
-sol::object Plugin::execute(Biz::Lua::LuaEngine& lua, const PluginParamValueMap& params) const
+void Plugin::load(Biz::Lua::LuaEngine& lua) const
 {
     SafeFileResolver resolver{m_path};
     lua.set_path_resolver(resolver);
@@ -190,6 +199,11 @@ sol::object Plugin::execute(Biz::Lua::LuaEngine& lua, const PluginParamValueMap&
     } catch (std::exception& e) {
         throw Biz::Lua::LuaException{e.what(), m_path};
     }
+}
+
+sol::object Plugin::execute(Biz::Lua::LuaEngine& lua, const PluginParamValueMap& params) const
+{
+    load(lua);
 
     sol::table opts = lua.state().create_table();
     for (const auto& [name, value] : params) {
