@@ -2271,6 +2271,10 @@ void MenuCommandRegistrar::register_main_menu_plugin_commands(Lua::PluginSystem&
 {
     bool any_plugin = false;
     for (auto& plugin : plugin_system.plugins() | std::views::values) {
+        // Only project plugins are user invoked; the others hook into the pipeline.
+        if (plugin.meta().type != Lua::PluginType::ProjectPlugin) {
+            continue;
+        }
         any_plugin = true;
         std::vector<UniversalMenuItemName> path;
         if (plugin.meta().menu.empty()) {

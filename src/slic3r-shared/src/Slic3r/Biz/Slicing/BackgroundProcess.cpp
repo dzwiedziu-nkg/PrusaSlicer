@@ -7,6 +7,8 @@
 #include "Slic3r/Domain/GCodeMetadata.hpp"
 #include "Slic3r/Biz/Config/GCodeMetadataJson.hpp" // IWYU pragma: keep
 
+#include "Slic3r/App/Lua/IslandOrderPlugin.hpp"
+#include "Slic3r/Directories.hpp"
 #include "Slic3r/Utils.hpp"
 #include "Slic3r/Version.hpp"
 #include "libslic3r/CanceledException.hpp"
@@ -244,6 +246,11 @@ void BackgroundProcess::slice(
                     status_update.warnings_to_append = {warning};
                     m_on_status(status_update);
                 };
+                // A plugin may reorder the islands of a layer during G-code export.
+                // Each print gets its own strategy, because several may be exported at once.
+                print->island_ordering_strategy = App::Lua::make_island_order_strategy(
+                    {resources_dir() + "/lua", data_dir() + "/lua"}
+                );
 
                 bool finished{false};
                 std::optional<Biz::Slicing::Error> slicing_error;
