@@ -142,7 +142,14 @@ private:
 
     sol::table describe(const PrintContext& context)
     {
-        return m_lua.state().create_table_with("printer_model", context.printer_model);
+        return m_lua.state().create_table_with(
+            "printer_model", context.printer_model,
+            "extruder_clearance_radius", context.extruder_clearance_radius,
+            "extruder_clearance_height", context.extruder_clearance_height,
+            "collision_model", GCode::IslandSequencing::supports_collision_check(context)
+                ? "coreone_fallback_v1"
+                : "unchecked"
+        );
     }
 
     std::optional<Plan> to_plan(const sol::table& returned)

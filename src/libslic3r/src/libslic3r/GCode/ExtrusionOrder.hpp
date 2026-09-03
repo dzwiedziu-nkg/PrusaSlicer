@@ -42,6 +42,9 @@ struct ObjectLayerToPrint
     const SupportLayer *support_layer;
     // If set, emit only these Layer::lslices_ex indices, in this order.
     std::optional<std::vector<std::size_t>> island_indices;
+    // A downward island-sequence transition uses the first infill as a long,
+    // model-contained nozzle wipe before the visible perimeters are emitted.
+    bool force_infill_first{false};
     const Layer *layer() const { return (object_layer != nullptr) ? object_layer : support_layer; }
     const PrintObject *object() const {
         return (this->layer() != nullptr) ? this->layer()->object() : nullptr;

@@ -31,6 +31,7 @@
 #include <cstdlib>
 #include <chrono>
 #include <math.h>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
@@ -472,6 +473,7 @@ struct SequencedIslandLayers
     std::vector<std::pair<double, GCodeGenerator::ObjectsLayerToPrint>> layers;
     double wipe_distance;
     double z_clearance;
+    bool collision_checked;
 };
 
 /**
@@ -522,7 +524,11 @@ std::optional<SequencedIslandLayers> sequence_island_layers(
 
     const PrintObject& object = *print.objects().front();
     const Domain::Point instance_offset = object.instances().front().shift();
-    const PrintContext context{print.config().get<std::string>("printer_model")};
+    const PrintContext context{
+        print.config().get<std::string>("printer_model"),
+        print.config().get<double>("extruder_clearance_radius"),
+        print.config().get<double>("extruder_clearance_height")
+    };
     std::optional<Plan> plan = plan_islands(
         print.island_sequencing_strategy, object_layers, instance_offset, context
     );
@@ -531,8 +537,11 @@ std::optional<SequencedIslandLayers> sequence_island_layers(
     }
 
     const std::vector<LayerInfo> described = describe_layers(object_layers, instance_offset);
-    SequencedIslandLayers result{{}, plan->wipe_distance, plan->z_clearance};
+    SequencedIslandLayers result{
+        {}, plan->wipe_distance, plan->z_clearance, plan->collision_checked
+    };
     result.layers.reserve(plan->steps.size());
+    double previous_print_z = -std::numeric_limits<double>::infinity();
     for (const PlanStep& step : plan->steps) {
         auto scheduled = stock[step.layer];
         std::vector<std::size_t> selected;
@@ -541,6 +550,9 @@ std::optional<SequencedIslandLayers> sequence_island_layers(
             selected.push_back(described[step.layer].islands[island_position].index);
         }
         scheduled.second.front().island_indices = std::move(selected);
+        scheduled.second.front().force_infill_first =
+            scheduled.first + EPSILON < previous_print_z;
+        previous_print_z = scheduled.first;
         result.layers.push_back(std::move(scheduled));
     }
 
@@ -1265,13 +1277,15 @@ Domain::ExtraPrintStatistics GCodeGenerator::_do_export(
                 // prepare_island_sequence_descent() caps only the transition move.
                 m_wipe.enable(m_island_sequence_wipe_distance);
             }
-            print.append_warning_callback(Biz::Slicing::Warning{
-                Biz::Slicing::WarningCode::IslandSequencingCollisionUnchecked,
-                {},
-                std::nullopt,
-                std::monostate{},
-                Biz::Slicing::WarningSeverity::HIGH
-            });
+            if (!sequenced->collision_checked) {
+                print.append_warning_callback(Biz::Slicing::Warning{
+                    Biz::Slicing::WarningCode::IslandSequencingCollisionUnchecked,
+                    {},
+                    std::nullopt,
+                    std::monostate{},
+                    Biz::Slicing::WarningSeverity::HIGH
+                });
+            }
         }
         m_layer_count = static_cast<unsigned int>(nonsequential_layers_to_print->size());
     }
