@@ -9,6 +9,111 @@
 
 namespace Slic3r::GCode::IslandSequencing {
 
+bool supports_collision_check(const PrintContext& context)
+{
+    // Start deliberately narrowly. Other printers keep the existing explicit
+    // unchecked-collision warning until their carriage geometry is implemented.
+    return context.printer_model == "COREONE"
+        && std::isfinite(context.extruder_clearance_radius)
+        && std::isfinite(context.extruder_clearance_height)
+        && context.extruder_clearance_radius > 0.
+        && context.extruder_clearance_height > 1.;
+}
+
+namespace {
+
+bool intervals_within(
+    const Domain::coord_t a_min,
+    const Domain::coord_t a_max,
+    const Domain::coord_t b_min,
+    const Domain::coord_t b_max,
+    const Domain::coord_t clearance
+)
+{
+    return a_max + clearance >= b_min && b_max + clearance >= a_min;
+}
+
+bool head_intersects(
+    const IslandInfo& target,
+    const IslandInfo& obstacle,
+    const double obstacle_above_nozzle,
+    const PrintContext& context
+)
+{
+    if (obstacle_above_nozzle <= EPSILON) {
+        return false;
+    }
+
+    // This mirrors ArrangeHelper.cpp's fallback geometry: a 10 x 10 mm nozzle
+    // slice at Z=0, a square clearance-radius slice at Z=1 mm, and an X gantry
+    // spanning the bed at extruder_clearance_height.
+    const double clearance_mm = obstacle_above_nozzle < 1.
+        ? 5.
+        : context.extruder_clearance_radius;
+    const Domain::coord_t clearance = scaled(clearance_mm);
+    const bool y_intersects = intervals_within(
+        target.bbox.min.y(), target.bbox.max.y(),
+        obstacle.bbox.min.y(), obstacle.bbox.max.y(), clearance
+    );
+    if (!y_intersects) {
+        return false;
+    }
+
+    if (obstacle_above_nozzle >= context.extruder_clearance_height) {
+        // The X gantry is conservatively treated as spanning the whole bed.
+        return true;
+    }
+    return intervals_within(
+        target.bbox.min.x(), target.bbox.max.x(),
+        obstacle.bbox.min.x(), obstacle.bbox.max.x(), clearance
+    );
+}
+
+} // namespace
+
+bool is_collision_free(
+    const Plan& plan,
+    const std::vector<LayerInfo>& layers,
+    const PrintContext& context
+)
+{
+    if (!supports_collision_check(context)) {
+        return false;
+    }
+
+    struct EmittedIsland
+    {
+        const IslandInfo* island;
+        double print_z;
+    };
+    std::vector<EmittedIsland> emitted;
+
+    for (const PlanStep& step : plan.steps) {
+        if (step.layer >= layers.size()) {
+            return false;
+        }
+        const LayerInfo& layer = layers[step.layer];
+        for (const std::size_t island_position : step.islands) {
+            if (island_position >= layer.islands.size()) {
+                return false;
+            }
+            const IslandInfo& target = layer.islands[island_position];
+            for (const EmittedIsland& obstacle : emitted) {
+                if (head_intersects(
+                        target,
+                        *obstacle.island,
+                        obstacle.print_z - layer.print_z,
+                        context
+                    )) {
+                    return false;
+                }
+            }
+            emitted.push_back(EmittedIsland{&target, layer.print_z});
+        }
+    }
+    return true;
+}
+
 namespace {
 
 using PositionMap = std::unordered_map<std::size_t, std::size_t>;
@@ -152,12 +257,24 @@ std::optional<Plan> plan_islands(
     if (!plan.has_value()) {
         return std::nullopt;
     }
+    // This is an engine verdict, never planner-supplied metadata.
+    plan->collision_checked = false;
     if (!valid_plan(*plan, layer_info)) {
         SPDLOG_ERROR(
             "Island sequencing plugin returned an invalid or unsupported plan; "
             "falling back to normal layer-by-layer printing"
         );
         return std::nullopt;
+    }
+    if (supports_collision_check(context)) {
+        if (!is_collision_free(*plan, layer_info, context)) {
+            SPDLOG_ERROR(
+                "Island sequencing plugin returned a plan which collides with the "
+                "CORE One print-head geometry; falling back to normal layer order"
+            );
+            return std::nullopt;
+        }
+        plan->collision_checked = true;
     }
     return plan;
 }

@@ -40,6 +40,9 @@ struct LayerInfo
 struct PrintContext
 {
     std::string printer_model;
+    /** Values used by PrusaSlicer's fallback sequential-print head geometry. */
+    double extruder_clearance_radius{0.};
+    double extruder_clearance_height{0.};
 };
 
 /** @brief A subset of one layer to emit as one scheduling step. */
@@ -59,6 +62,8 @@ struct Plan
     double wipe_distance{2.0};
     /** Extra Z clearance used for the high XY move to the next branch. */
     double z_clearance{0.5};
+    /** Set by the engine after validating the plan with a supported head model. */
+    bool collision_checked{false};
 };
 
 using Strategy = std::function<std::optional<Plan>(
@@ -81,6 +86,21 @@ std::optional<Plan> plan_islands(
     const Strategy& strategy,
     const std::vector<const Layer*>& layers,
     const Domain::Point& instance_offset,
+    const PrintContext& context
+);
+
+/** @brief Whether the engine has an implemented collision model for this printer. */
+bool supports_collision_check(const PrintContext& context);
+
+/**
+ * @brief Checks a complete schedule against already printed, higher geometry.
+ *
+ * This currently implements the same three-slice fallback head model used by
+ * PrusaSlicer's sequential-object arranger for Original Prusa CORE One.
+ */
+bool is_collision_free(
+    const Plan& plan,
+    const std::vector<LayerInfo>& layers,
     const PrintContext& context
 );
 
