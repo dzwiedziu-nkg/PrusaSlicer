@@ -7,6 +7,7 @@
 #include "Slic3r/Domain/GCodeMetadata.hpp"
 #include "Slic3r/Biz/Config/GCodeMetadataJson.hpp" // IWYU pragma: keep
 
+#include "Slic3r/App/Lua/ExtrusionFilterPlugin.hpp"
 #include "Slic3r/App/Lua/IslandOrderPlugin.hpp"
 #include "Slic3r/Directories.hpp"
 #include "Slic3r/Utils.hpp"
@@ -249,6 +250,10 @@ void BackgroundProcess::slice(
                 // A plugin may reorder the islands of a layer during G-code export.
                 // Each print gets its own strategy, because several may be exported at once.
                 print->island_ordering_strategy = App::Lua::make_island_order_strategy(
+                    {resources_dir() + "/lua", data_dir() + "/lua"}
+                );
+                // A plugin may also drop extrusions that are not worth the travel to reach them.
+                print->extrusion_filter = App::Lua::make_extrusion_filter(
                     {resources_dir() + "/lua", data_dir() + "/lua"}
                 );
 

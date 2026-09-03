@@ -54,8 +54,8 @@ Here is an example of bundled plugin manifest:
 }
 ```
 
-The recognized `required_apis` keys are `project.plugin` and `slicing.island_order`, both
-at version `1.0.0`.
+The recognized `required_apis` keys are `project.plugin`, `slicing.island_order`
+and `slicing.extrusion_filter`, all at version `1.0.0`.
 
 This is list of recognized `manifest.json` fields. 
 
@@ -78,7 +78,8 @@ This is list of recognized `manifest.json` fields.
 
 The table `info` describes plugin with following keys:
 - `id` (string) plugin unique identifier, recommended is reverse domain name like notation
-- `type` (string) type of plugin, allowed values are `'project.plugin'` and `'slicing.island_order'`.
+- `type` (string) type of plugin, allowed values are `'project.plugin'`,
+  `'slicing.island_order'` and `'slicing.extrusion_filter'`.
 - `title` (string) displayed plugin name
 - `menu` (string) menu item path to register the plugin under _Plugins_ menu item (e.g. `Calibration/My cool pattern`).
   Only used by `project.plugin`.
@@ -192,6 +193,57 @@ so a plugin never has to think about concurrency.
 
 At most one `slicing.island_order` plugin is used at a time. If several are installed, the
 first by plugin id wins and the others are ignored with a warning in the log.
+
+### `slicing.extrusion_filter`
+
+Decides whether a single extrusion is printed at all.
+
+A fill pattern clipped against a contour leaves stubs behind: an infill line that
+survives only a millimetre in a corner, an internal perimeter reduced to a sliver. The
+stub itself is nothing, but the head still has to travel to it, retract, extrude, retract
+again and travel away. On a tall part with four such corners that repeats on every layer.
+
+The plugin has to define `keep_extrusion(path)`:
+
+```lua
+info = {
+    id = "short_extrusion",
+    type = "slicing.extrusion_filter",
+    title = "Drop short extrusions"
+}
+
+function keep_extrusion(path)
+    -- path = {
+    --     role        = <string>,    -- see the list below
+    --     length      = <mm>,        -- along the path's own geometry
+    --     layer_id    = <integer>,
+    --     print_z     = <mm>,
+    --     extruder_id = <integer>
+    -- }
+    if path.role == "ExternalPerimeter" or path.role == "TopSolidInfill" then
+        return true
+    end
+    return path.length >= 2.0
+end
+```
+
+Return `true` to print the path, `false` to drop it. Anything that is not a boolean is
+reported once and every extrusion is kept for the rest of the export, as is an error
+raised by the plugin, so a broken plugin can never fail a slice.
+
+`role` is one of `Perimeter`, `ExternalPerimeter`, `OverhangPerimeter`, `InternalInfill`,
+`SolidInfill`, `TopSolidInfill`, `Ironing`, `BridgeInfill`, `GapFill`, `Skirt`,
+`SupportMaterial`, `SupportMaterialInterface`, `WipeTower`, `Custom`. These are stable
+identifiers, not the translated names the UI shows.
+
+The plugin is asked about every perimeter and infill path as the extrusions of a layer
+are collected, *before* travels and seams are decided, so a rejected path disappears
+together with the movement that would have reached it, and the paths that remain are
+routed as if it had never existed. Calls belonging to one print arrive serialized and in
+layer order; concurrently exported beds each get their own Lua state.
+
+Note that this is called once per extrusion path rather than once per layer, which is a
+few thousand calls on a typical print. Keep the function cheap.
 
 ## Plugin API
 
