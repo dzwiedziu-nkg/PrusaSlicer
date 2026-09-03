@@ -142,6 +142,7 @@ enum class WarningCode
     CloseToPrimingRegions, // _u8L( "Your print is very close to the priming regions. " "Make sure there is no collision.")
     ToolpathOutsideBuildVolume,
     GCodeConflict,
+    IslandSequencingCollisionUnchecked,
     XYSizeCompensationIgnoredMultiMaterialPainting,
     XYSizeCompensationIgnoredFuzzySkinPainting
 };

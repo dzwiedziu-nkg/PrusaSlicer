@@ -16,13 +16,15 @@ namespace fs = boost::filesystem;
 namespace {
 const std::unordered_map<PluginType, std::string> PLUGIN_TYPE_NAMES = {
     {PluginType::ProjectPlugin, "project.plugin"},
-    {PluginType::SlicingIslandOrder, "slicing.island_order"}
+    {PluginType::SlicingIslandOrder, "slicing.island_order"},
+    {PluginType::SlicingIslandSequence, "slicing.island_sequence"}
 };
 
 // The global each plugin type has to define to be usable.
 const std::unordered_map<PluginType, std::string> PLUGIN_ENTRY_POINTS = {
     {PluginType::ProjectPlugin, "execute"},
-    {PluginType::SlicingIslandOrder, "order_islands"}
+    {PluginType::SlicingIslandOrder, "order_islands"},
+    {PluginType::SlicingIslandSequence, "plan_islands"}
 };
 }
 

@@ -10,6 +10,7 @@
 #include "libslic3r/Geometry/ConvexHull.hpp"
 #include "libslic3r/GCode/PostProcessor.hpp"
 #include "libslic3r/GCode/PrintExtents.hpp"
+#include "libslic3r/GCode/IslandSequencing.hpp"
 #include "libslic3r/GCode/Thumbnails.hpp"
 #include "libslic3r/GCode/WipeTower.hpp"
 #include "libslic3r/GCode/WipeTowerIntegration.hpp"
@@ -463,6 +464,94 @@ std::vector<std::pair<double, GCodeGenerator::ObjectsLayerToPrint>> GCodeGenerat
 
     return layers_to_print;
 }
+
+namespace {
+
+struct SequencedIslandLayers
+{
+    std::vector<std::pair<double, GCodeGenerator::ObjectsLayerToPrint>> layers;
+    double wipe_distance;
+    double z_clearance;
+};
+
+/**
+ * @brief Applies the experimental cross-layer island schedule when the print is in
+ * the deliberately small, safe MVP envelope.
+ */
+std::optional<SequencedIslandLayers> sequence_island_layers(
+    const Print& print,
+    const std::vector<std::pair<double, GCodeGenerator::ObjectsLayerToPrint>>& stock
+)
+{
+    using namespace GCode::IslandSequencing;
+
+    if (!print.island_sequencing_strategy) {
+        return std::nullopt;
+    }
+    const auto custom_gcode = print.custom_gcode();
+    if (print.objects().size() != 1 || print.objects().front()->instances().size() != 1
+        || print.config().get<bool>("complete_objects")
+        || print.config().get<bool>("spiral_vase")
+        || print.wipe_tower_data().has_value()
+        || print.has_infinite_skirt()
+        || !print.objects().front()->support_layers().empty()
+        || (custom_gcode && !custom_gcode->get().gcodes.empty())) {
+        SPDLOG_WARN(
+            "Island sequencing plugin is installed but this print is outside the supported "
+            "MVP envelope (one object, one instance, no supports, wipe tower, infinite "
+            "skirt, spiral vase, complete-objects mode, or height-based custom G-code); "
+            "using normal layer order"
+        );
+        return std::nullopt;
+    }
+
+    std::vector<const Layer*> object_layers;
+    object_layers.reserve(stock.size());
+    for (const auto& [print_z, layers] : stock) {
+        (void)print_z;
+        if (layers.size() != 1 || layers.front().object_layer == nullptr
+            || layers.front().support_layer != nullptr) {
+            SPDLOG_WARN(
+                "Island sequencing plugin cannot map the collected object layers; "
+                "using normal layer order"
+            );
+            return std::nullopt;
+        }
+        object_layers.push_back(layers.front().object_layer);
+    }
+
+    const PrintObject& object = *print.objects().front();
+    const Domain::Point instance_offset = object.instances().front().shift();
+    const PrintContext context{print.config().get<std::string>("printer_model")};
+    std::optional<Plan> plan = plan_islands(
+        print.island_sequencing_strategy, object_layers, instance_offset, context
+    );
+    if (!plan.has_value()) {
+        return std::nullopt;
+    }
+
+    const std::vector<LayerInfo> described = describe_layers(object_layers, instance_offset);
+    SequencedIslandLayers result{{}, plan->wipe_distance, plan->z_clearance};
+    result.layers.reserve(plan->steps.size());
+    for (const PlanStep& step : plan->steps) {
+        auto scheduled = stock[step.layer];
+        std::vector<std::size_t> selected;
+        selected.reserve(step.islands.size());
+        for (const std::size_t island_position : step.islands) {
+            selected.push_back(described[step.layer].islands[island_position].index);
+        }
+        scheduled.second.front().island_indices = std::move(selected);
+        result.layers.push_back(std::move(scheduled));
+    }
+
+    SPDLOG_INFO(
+        "Island sequencing plan accepted: {} physical layers, {} scheduled steps",
+        stock.size(), result.layers.size()
+    );
+    return result;
+}
+
+} // namespace
 
 // free functions called by GCodeGenerator::do_export()
 namespace DoExport {
@@ -1116,6 +1205,8 @@ Domain::ExtraPrintStatistics GCodeGenerator::_do_export(
     unsigned int initial_extruder_id = (unsigned int)-1;
     unsigned int final_extruder_id   = (unsigned int)-1;
     bool         has_wipe_tower      = false;
+    std::optional<std::vector<std::pair<double, ObjectsLayerToPrint>>>
+        nonsequential_layers_to_print;
     std::vector<const PrintInstance*> 					print_object_instances_ordering;
     std::vector<const PrintInstance*>::const_iterator 	print_object_instance_sequential_active;
     if (print.config().get<bool>("complete_objects")) {
@@ -1160,7 +1251,29 @@ Domain::ExtraPrintStatistics GCodeGenerator::_do_export(
         this->set_extruders(tool_ordering.all_extruders(), print.config());
         // Order object instances using a nearest neighbor search.
         print_object_instances_ordering = chain_print_object_instances(print);
-        m_layer_count = tool_ordering.layer_tools().size();
+        nonsequential_layers_to_print = collect_layers_to_print(print);
+        if (std::optional<SequencedIslandLayers> sequenced = sequence_island_layers(
+                print, *nonsequential_layers_to_print
+            )) {
+            nonsequential_layers_to_print = std::move(sequenced->layers);
+            m_island_sequence_wipe_distance = sequenced->wipe_distance;
+            m_island_sequence_z_clearance = sequenced->z_clearance;
+            m_island_sequence_active = true;
+            if (m_island_sequence_wipe_distance > 0. && !m_wipe.enabled()) {
+                // Cache the final extrusion path even when ordinary filament wipe is off.
+                // If wipe is already enabled, keep its (possibly longer) cache limit;
+                // prepare_island_sequence_descent() caps only the transition move.
+                m_wipe.enable(m_island_sequence_wipe_distance);
+            }
+            print.append_warning_callback(Biz::Slicing::Warning{
+                Biz::Slicing::WarningCode::IslandSequencingCollisionUnchecked,
+                {},
+                std::nullopt,
+                std::monostate{},
+                Biz::Slicing::WarningSeverity::HIGH
+            });
+        }
+        m_layer_count = static_cast<unsigned int>(nonsequential_layers_to_print->size());
     }
     if (initial_extruder_id == (unsigned int)-1) {
         // Nothing to print!
@@ -1350,7 +1463,8 @@ Domain::ExtraPrintStatistics GCodeGenerator::_do_export(
     } else {
         // Sort layers by Z.
         // All extrusion moves with the same top layer height are extruded uninterrupted.
-        std::vector<std::pair<double, ObjectsLayerToPrint>> layers_to_print = collect_layers_to_print(print);
+        std::vector<std::pair<double, ObjectsLayerToPrint>> layers_to_print =
+            std::move(*nonsequential_layers_to_print);
         // Prusa Multi-Material wipe tower.
         if (has_wipe_tower && ! layers_to_print.empty()) {
             m_wipe_tower = std::make_unique<GCode::WipeTowerIntegration>(
@@ -2562,6 +2676,14 @@ std::vector<GCode::ExtrusionOrder::ExtruderExtrusions> GCodeGenerator::get_sorte
             previous_position
         )
     };
+    if (m_island_sequence_active) {
+        // LayerTools describes the complete physical layer. A selected branch may not
+        // use all of those tools, so avoid pointless (and potentially hazardous) dock
+        // visits for tools which have no extrusion in this scheduling step.
+        std::erase_if(extrusions, [](const ExtruderExtrusions& item) {
+            return !GCode::ExtrusionOrder::get_first_point(item).has_value();
+        });
+    }
     this->m_brim_done = true;
 
     return extrusions;
@@ -2665,7 +2787,10 @@ LayerResult GCodeGenerator::process_layer(
         m_enable_loop_clipping = !enable;
     }
 
-    const float height = first_layer ? static_cast<float>(print_z) : static_cast<float>(print_z) - m_last_layer_z;
+    const bool island_sequence_descent = m_island_sequence_active
+        && print_z < m_last_layer_z - EPSILON;
+    const float height = island_sequence_descent ? static_cast<float>(layer.height) :
+        (first_layer ? static_cast<float>(print_z) : static_cast<float>(print_z) - m_last_layer_z);
 
     using GCode::ExtrusionOrder::ExtruderExtrusions;
     const std::vector<ExtruderExtrusions> extrusions{
@@ -2691,6 +2816,15 @@ LayerResult GCodeGenerator::process_layer(
         !uses_wipe_tower && is_tool_change_before_first_extrusion(m_writer, extrusions);
 
     std::string gcode;
+
+    if (island_sequence_descent) {
+        // Retract on the last printed path, rise, and move above the next branch before
+        // Z descends. The normal layer change below then performs only the vertical drop.
+        const Biz::Slicing::ExtrudeConfig descent_config{layer.object()->config()};
+        gcode += this->prepare_island_sequence_descent(
+            first_segment.point, descent_config
+        );
+    }
 
     assert(is_decimal_separator_point()); // for the sprintfs
 
@@ -4042,6 +4176,49 @@ std::string GCodeGenerator::retract_and_wipe(
         gcode += m_writer.reset_e();
     }
 
+    return gcode;
+}
+
+std::string GCodeGenerator::prepare_island_sequence_descent(
+    const Point& next_point,
+    const Biz::Slicing::ExtrudeConfig& config
+)
+{
+    std::string gcode{"; ISLAND_SEQUENCE_TRANSITION_BEGIN\n"};
+    const bool cooling_markers_were_enabled = m_enable_cooling_markers;
+    m_enable_cooling_markers = false;
+
+    // The final non-loop extrusion is normally infill (or top solid infill). Wipe
+    // backwards over that cached path while retracting, capped to the plugin's small
+    // requested distance. Finish any remaining retraction before the long Z move.
+    if (m_island_sequence_wipe_distance > 0. && m_wipe.has_path()) {
+        gcode += m_writer.retract(true);
+        gcode += m_wipe.wipe(
+            *this,
+            config.retract_speed,
+            config.travel_speed,
+            false,
+            m_island_sequence_wipe_distance
+        );
+    }
+    gcode += m_writer.retract();
+    gcode += m_writer.reset_e();
+    m_wipe.reset_path();
+
+    // Clear the completed top first, then perform XY at the high Z. change_layer()
+    // is allowed to descend only once the nozzle is above the next island.
+    const double clearance_z = std::min(
+        m_print->config().get<double>("max_print_height"),
+        std::max(m_writer.get_position().z(), static_cast<double>(m_max_layer_z))
+            + m_island_sequence_z_clearance
+    );
+    gcode += m_writer.travel_to_z(clearance_z, "island sequence Z clearance");
+    const Vec2d next_xy = unscaled(next_point);
+    gcode += m_writer.travel_to_xy(next_xy, "move above next island before descending");
+    last_position = this->gcode_to_point(next_xy);
+
+    m_enable_cooling_markers = cooling_markers_were_enabled;
+    gcode += "; ISLAND_SEQUENCE_TRANSITION_END\n";
     return gcode;
 }
 

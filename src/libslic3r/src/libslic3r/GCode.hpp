@@ -371,6 +371,10 @@ private:
         bool toolchange = false,
         bool reset_e    = true
     );
+    std::string prepare_island_sequence_descent(
+        const Point& next_point,
+        const Biz::Slicing::ExtrudeConfig& config
+    );
     std::string     unretract() { return m_writer.unretract(); }
     std::string set_extruder(unsigned int extruder_id, double print_z, const Domain::ConfigView& config);
     bool line_distancer_is_required(
@@ -459,6 +463,11 @@ private:
     std::unique_ptr<GCodeFindReplace>   m_find_replace;
     std::unique_ptr<PressureEqualizer>  m_pressure_equalizer;
     std::unique_ptr<GCode::WipeTowerIntegration> m_wipe_tower;
+
+    // Non-zero only while an accepted slicing.island_sequence plan is emitted.
+    double                              m_island_sequence_wipe_distance{0.};
+    double                              m_island_sequence_z_clearance{0.};
+    bool                                m_island_sequence_active{false};
 
     // Current fan speed set by dynamic fan speed control.
     std::optional<float>                m_current_dynamic_fan_speed;

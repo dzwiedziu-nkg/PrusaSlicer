@@ -15,7 +15,8 @@ namespace Slic3r::App::Lua {
 enum class PluginType
 {
     ProjectPlugin,
-    SlicingIslandOrder
+    SlicingIslandOrder,
+    SlicingIslandSequence
 };
 
 tl::expected<PluginType, std::string> parse_plugin_type(std::string_view s);

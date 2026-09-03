@@ -40,6 +40,8 @@ struct ObjectLayerToPrint
     ObjectLayerToPrint() : object_layer(nullptr), support_layer(nullptr) {}
     const Layer *object_layer;
     const SupportLayer *support_layer;
+    // If set, emit only these Layer::lslices_ex indices, in this order.
+    std::optional<std::vector<std::size_t>> island_indices;
     const Layer *layer() const { return (object_layer != nullptr) ? object_layer : support_layer; }
     const PrintObject *object() const {
         return (this->layer() != nullptr) ? this->layer()->object() : nullptr;
