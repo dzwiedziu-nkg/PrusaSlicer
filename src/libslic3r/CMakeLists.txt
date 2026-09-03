@@ -191,6 +191,7 @@ set(SLIC3R_SOURCES
     src/libslic3r/GCode/CoolingBuffer.hpp
     src/libslic3r/GCode/CoolingBufferConfig.cpp
     src/libslic3r/GCode/CoolingBufferConfig.hpp
+    src/libslic3r/GCode/ExtrusionFilter.cpp
     src/libslic3r/GCode/ExtrusionOrder.cpp
     src/libslic3r/GCode/ExtrusionOrder.hpp
     src/libslic3r/GCode/ExtrusionProcessor.cpp
@@ -417,6 +418,7 @@ set(SLIC3R_SOURCES
 set(SLIC3R_PUBLIC_HEADERS
     include/libslic3r/CustomGCode.hpp
     include/libslic3r/ExtruderCandidates.hpp
+    include/libslic3r/GCode/ExtrusionFilter.hpp
     include/libslic3r/GCode/IslandOrdering.hpp
     include/libslic3r/GCode/IslandSequencing.hpp
     include/libslic3r/GeneratedSupportPoints.hpp
