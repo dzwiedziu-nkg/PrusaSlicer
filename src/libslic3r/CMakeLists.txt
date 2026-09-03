@@ -202,6 +202,7 @@ set(SLIC3R_SOURCES
     src/libslic3r/GCode/GCodeWriterConfig.cpp
     src/libslic3r/GCode/GCodeWriterConfig.hpp
     src/libslic3r/GCode/IslandOrdering.cpp
+    src/libslic3r/GCode/IslandSequencing.cpp
     src/libslic3r/GCode/LabelObjects.cpp
     src/libslic3r/GCode/LabelObjects.hpp
     src/libslic3r/GCode/ModelVisibility.cpp
@@ -417,6 +418,7 @@ set(SLIC3R_PUBLIC_HEADERS
     include/libslic3r/CustomGCode.hpp
     include/libslic3r/ExtruderCandidates.hpp
     include/libslic3r/GCode/IslandOrdering.hpp
+    include/libslic3r/GCode/IslandSequencing.hpp
     include/libslic3r/GeneratedSupportPoints.hpp
     include/libslic3r/IPrint.hpp
     include/libslic3r/InitPrint.hpp

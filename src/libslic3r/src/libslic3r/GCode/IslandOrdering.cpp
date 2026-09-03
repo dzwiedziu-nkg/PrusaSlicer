@@ -34,12 +34,18 @@ bool is_permutation(const std::vector<std::size_t>& order, const std::size_t cou
 
 } // namespace
 
-std::vector<IslandInfo> describe_islands(const Layer& layer, const Point& instance_offset)
+std::vector<IslandInfo> describe_islands(
+    const Layer& layer,
+    const Point& instance_offset,
+    const std::vector<std::size_t>* selected_indices
+)
 {
     std::vector<IslandInfo> islands;
-    islands.reserve(layer.lslice_indices_sorted_by_print_order.size());
+    const std::vector<std::size_t>& indices = selected_indices == nullptr ?
+        layer.lslice_indices_sorted_by_print_order : *selected_indices;
+    islands.reserve(indices.size());
 
-    for (const std::size_t index : layer.lslice_indices_sorted_by_print_order) {
+    for (const std::size_t index : indices) {
         if (index >= layer.lslices_ex.size()) {
             continue;
         }
@@ -75,17 +81,19 @@ std::vector<std::size_t> order_islands(
     const Layer& layer,
     const Point& instance_offset,
     const unsigned extruder_id,
-    const std::optional<Point>& head_position
+    const std::optional<Point>& head_position,
+    const std::vector<std::size_t>* selected_indices
 )
 {
-    const std::vector<std::size_t>& stock_order = layer.lslice_indices_sorted_by_print_order;
+    const std::vector<std::size_t>& stock_order = selected_indices == nullptr ?
+        layer.lslice_indices_sorted_by_print_order : *selected_indices;
 
     // Nothing to decide for a single island, and no strategy means stock behaviour.
     if (!strategy || stock_order.size() < 2) {
         return stock_order;
     }
 
-    const std::vector<IslandInfo> islands = describe_islands(layer, instance_offset);
+    const std::vector<IslandInfo> islands = describe_islands(layer, instance_offset, selected_indices);
     if (islands.size() < 2) {
         return stock_order;
     }

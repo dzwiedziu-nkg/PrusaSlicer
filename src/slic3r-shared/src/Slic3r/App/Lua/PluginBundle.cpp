@@ -23,7 +23,8 @@ using Result = tl::expected<T, std::string>;
 namespace {
 const std::map<PluginApiType, std::string> PLUGIN_API_TYPE_NAMES = {
     {PluginApiType::Project, "project.plugin"},
-    {PluginApiType::SlicingIslandOrder, "slicing.island_order"}
+    {PluginApiType::SlicingIslandOrder, "slicing.island_order"},
+    {PluginApiType::SlicingIslandSequence, "slicing.island_sequence"}
 };
 }
 

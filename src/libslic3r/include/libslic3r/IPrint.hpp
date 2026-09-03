@@ -10,6 +10,7 @@
 #include "Slic3r/Domain/Preset/SelectedPreset.hpp"
 #include "jthread/JThread.hpp"
 #include "libslic3r/GCode/IslandOrdering.hpp"
+#include "libslic3r/GCode/IslandSequencing.hpp"
 #include "libslic3r/IThumbnailImageGenerator.hpp"
 #include "libslic3r/PrintSteps.hpp"
 #include "libslic3r/SlicingStatus.hpp"
@@ -83,6 +84,12 @@ public:
      * FFF prints. See GCode::IslandOrdering for the contract and the threading rules.
      */
     GCode::IslandOrdering::Strategy island_ordering_strategy;
+
+    /**
+     * Optionally schedules connected islands across layer boundaries. Empty by
+     * default, which preserves normal layer-by-layer G-code generation.
+     */
+    GCode::IslandSequencing::Strategy island_sequencing_strategy;
 };
 
 struct ValidationResult

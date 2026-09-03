@@ -357,6 +357,15 @@ std::string to_display_string(Biz::Slicing::Warning warning, const Domain::Proje
             detail.height, detail.object_names[0], detail.object_names[1]);
     }
 
+    case WarningCode::IslandSequencingCollisionUnchecked:
+        message = _u8L(
+            "Sequential island printing is experimental. The normal sequential-print "
+            "collision check does not model islands which start above the bed. Verify the "
+            "generated toolpath and make sure the print head and carriage clear every "
+            "completed island before printing."
+        );
+        break;
+
     case WarningCode::XYSizeCompensationIgnoredMultiMaterialPainting:
         message = _u8L(
             "An object has enabled XY Size compensation which will not be used "
