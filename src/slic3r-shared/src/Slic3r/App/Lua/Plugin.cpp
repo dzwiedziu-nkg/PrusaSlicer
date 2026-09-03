@@ -15,7 +15,14 @@ namespace fs = boost::filesystem;
 
 namespace {
 const std::unordered_map<PluginType, std::string> PLUGIN_TYPE_NAMES = {
-    {PluginType::ProjectPlugin, "project.plugin"}
+    {PluginType::ProjectPlugin, "project.plugin"},
+    {PluginType::SlicingIslandOrder, "slicing.island_order"}
+};
+
+// The global each plugin type has to define to be usable.
+const std::unordered_map<PluginType, std::string> PLUGIN_ENTRY_POINTS = {
+    {PluginType::ProjectPlugin, "execute"},
+    {PluginType::SlicingIslandOrder, "order_islands"}
 };
 }
 
@@ -114,10 +121,6 @@ Plugin::parse(Biz::Lua::LuaEngine& lua, const std::string& id_prefix, const std:
     meta.type = type_result.value();
     meta.title = info.get<std::optional<std::string>>("title");
 
-    if (meta.type != PluginType::ProjectPlugin) {
-        return tl::unexpected{fmt::format("Unsupported plugin type '{}'", to_string(meta.type))};
-    }
-
     if (info["menu"].valid()) {
         std::vector<std::string> menu_items;
         std::string menu = info["menu"];
@@ -139,8 +142,9 @@ Plugin::parse(Biz::Lua::LuaEngine& lua, const std::string& id_prefix, const std:
         });
     }
 
-    if (!state["execute"].is<sol::function>()) {
-        return tl::unexpected{"Missing execute() function"};
+    const std::string& entry_point = PLUGIN_ENTRY_POINTS.at(meta.type);
+    if (!state[entry_point].is<sol::function>()) {
+        return tl::unexpected{fmt::format("Missing {}() function", entry_point)};
     }
 
     return Plugin{path, meta};
@@ -149,7 +153,7 @@ Plugin::parse(Biz::Lua::LuaEngine& lua, const std::string& id_prefix, const std:
 Plugin::Plugin(std::string path, PluginMeta meta) : m_path(std::move(path)), m_meta(std::move(meta))
 {}
 
-void Plugin::execute(Biz::Lua::LuaEngine& lua, const PluginParamValueMap& params) const
+void Plugin::load(Biz::Lua::LuaEngine& lua) const
 {
     SafeFileResolver resolver{m_path};
     lua.set_path_resolver(resolver);
@@ -161,6 +165,11 @@ void Plugin::execute(Biz::Lua::LuaEngine& lua, const PluginParamValueMap& params
     } catch (std::exception& e) {
         throw Biz::Lua::LuaException{e.what(), m_path};
     }
+}
+
+void Plugin::execute(Biz::Lua::LuaEngine& lua, const PluginParamValueMap& params) const
+{
+    load(lua);
 
     sol::table opts = lua.state().create_table();
     for (const auto& [name, value] : params) {

@@ -30,7 +30,8 @@ to `<config_dir>/lua/com.example.my-plugin` and run Plugins -> Rescan menu item 
 - Plugin bundles contains `manifest.json` metadata file and one or more plugins
 - Each plugin is single .lua file located under specific directory (e.g. `(datadir)/lua` or `(configdir)/lua`).
 - Plugin file has to define `info` variable with description of the plugin.
-- Plugin file has to define `execute` function, that runs the plugin logic.
+- Plugin file has to define the entry point function of its type, that runs the plugin logic
+  (`execute` for `project.plugin`, see [Plugin types](#plugin-types)).
 
 ### Plugin Bundle Metadata `manifest.json`
 
@@ -53,6 +54,9 @@ Here is an example of bundled plugin manifest:
 }
 ```
 
+The recognized `required_apis` keys are `project.plugin` and `slicing.island_order`, both
+at version `1.0.0`.
+
 This is list of recognized `manifest.json` fields. 
 
 | Key                  | Required | Description                                                                         |
@@ -74,9 +78,10 @@ This is list of recognized `manifest.json` fields.
 
 The table `info` describes plugin with following keys:
 - `id` (string) plugin unique identifier, recommended is reverse domain name like notation
-- `type` (string) type of plugin, at the moment only `'project.plugin'` is allowed.
+- `type` (string) type of plugin, allowed values are `'project.plugin'` and `'slicing.island_order'`.
 - `title` (string) displayed plugin name
-- `menu` (string) menu item path to register the plugin under _Plugins_ menu item (e.g. `Calibration/My cool pattern`)
+- `menu` (string) menu item path to register the plugin under _Plugins_ menu item (e.g. `Calibration/My cool pattern`).
+  Only used by `project.plugin`.
 - `params` (array) list of parameter descriptions with following keys:
   - `name` (string) name of key in table as first argument passed to the `execute()` function.
   - `label` (string) displayed name in UI 
@@ -124,6 +129,69 @@ There are two main restrictions to be aware of:
 - no standard `os` and `io` modules are available,
 - plugin can access (via `emboss_svg`, `load_stl` and `require`) only files that are in the same directory 
   as the plugin .lua file itself. 
+
+## Plugin types
+
+### `project.plugin`
+
+Runs on demand from the _Plugins_ menu and builds on the project: it can add objects,
+insert custom G-code on a layer and so on. Its entry point is `execute(params)`, described
+above.
+
+### `slicing.island_order`
+
+Hooks into slicing rather than into the GUI: it decides the order in which the disjoint
+islands of a layer are printed. A layer of an object may fall apart into several separate
+regions — think of a model that splits into towers above a common base. By default their
+order is chained once, at slicing time, before it is known where the print head will be
+when the layer starts, so the head tends to return to the same island at the beginning of
+every layer. A plugin of this type is asked during G-code export instead, where the head
+position is known, and can order the islands to shorten the travels between them.
+
+The plugin has to define `order_islands(islands, ctx)`:
+
+```lua
+info = {
+    id = "island_order",
+    type = "slicing.island_order",
+    title = "Shortest travel island order"
+}
+
+function order_islands(islands, ctx)
+    -- islands[i] = {
+    --     centroid = {x = <mm>, y = <mm>},
+    --     bbox = {min_x = <mm>, min_y = <mm>, max_x = <mm>, max_y = <mm>}
+    -- }
+    -- ctx = {
+    --     layer_id    = <integer>,
+    --     print_z     = <mm>,
+    --     extruder_id = <integer>,
+    --     head        = {x = <mm>, y = <mm>}   -- nil before anything has been extruded
+    -- }
+    local order = {}
+    for i = 1, #islands do
+        order[i] = i
+    end
+    return order    -- the stock order
+end
+```
+
+Coordinates are in millimetres, in the same frame as `ctx.head`, so a plugin does not need
+to know about object instance offsets.
+
+The return value is an array of **positions into `islands`**, 1-based, each appearing
+exactly once — a permutation of `1..#islands`, not a set of slicer island identifiers.
+Anything else is rejected and the stock order is used instead. An error raised by the
+plugin is reported once and the stock order is used for the rest of the export, so a
+broken plugin can never fail a slice.
+
+`order_islands` is called once per layer and per object instance, and only for layers that
+hold at least two islands. Calls belonging to one print arrive serialized and in layer
+order. Two beds may be sliced at the same time, but each of them gets its own Lua state,
+so a plugin never has to think about concurrency.
+
+At most one `slicing.island_order` plugin is used at a time. If several are installed, the
+first by plugin id wins and the others are ignored with a warning in the log.
 
 ## Plugin API
 

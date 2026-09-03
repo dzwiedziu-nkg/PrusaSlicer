@@ -22,7 +22,8 @@ constexpr auto META_FILENAME = "manifest.json";
 
 enum class PluginApiType
 {
-    Project
+    Project,
+    SlicingIslandOrder
 };
 
 std::string to_string(PluginApiType pat);

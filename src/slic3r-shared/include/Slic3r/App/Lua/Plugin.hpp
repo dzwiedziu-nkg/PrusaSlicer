@@ -14,7 +14,8 @@ namespace Slic3r::App::Lua {
 
 enum class PluginType
 {
-    ProjectPlugin
+    ProjectPlugin,
+    SlicingIslandOrder
 };
 
 tl::expected<PluginType, std::string> parse_plugin_type(std::string_view s);
@@ -49,6 +50,13 @@ public:
     const PluginMeta& meta() const { return m_meta; }
     PluginMeta& meta() { return m_meta; }
     const std::string& path() const { return m_path; }
+
+    /**
+     * @brief Loads the plugin chunk into @p lua with the file sandbox in place.
+     *
+     * Leaves the plugin's globals (@c info and its entry point) defined in @p lua.
+     */
+    void load(Biz::Lua::LuaEngine& lua) const;
 
     void execute(Biz::Lua::LuaEngine& lua, const PluginParamValueMap& params) const;
 
