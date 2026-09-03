@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cinttypes>
 
+#include "libslic3r/GCode/ExtrusionFilter.hpp"
 #include "libslic3r/GCode/IslandOrdering.hpp"
 #include "libslic3r/GCode/SmoothPath.hpp"
 #include "libslic3r/ShortestPath.hpp"
@@ -97,6 +98,34 @@ ExtrusionEntitiesPtr extract_infill_extrusions(
     return result;
 }
 
+namespace {
+// Asks the print's extrusion filter about a freshly smoothed path.
+//
+// The path is described by the role of its first element; a smooth path never mixes
+// roles. Dropping a path must also undo the head position that producing it advanced,
+// otherwise the seam of the next path would be anchored on an extrusion that is not
+// going to be printed.
+bool keep_smoothed_path(
+    const Print &print,
+    const GCode::SmoothPath &path,
+    const Layer &layer,
+    const unsigned extruder_id
+) {
+    if (!print.extrusion_filter || path.empty()) {
+        return true;
+    }
+
+    const GCode::ExtrusionFilter::PathInfo info{
+        extrusion_role_to_gcode_extrusion_role(path.front().path_attributes.role),
+        unscaled<double>(GCode::length(path)),
+        layer.id(),
+        layer.print_z,
+        extruder_id
+    };
+    return GCode::ExtrusionFilter::keep(print.extrusion_filter, info);
+}
+} // namespace
+
 std::vector<Perimeter> extract_perimeter_extrusions(
     const Print &print,
     const Layer &layer,
@@ -129,9 +158,12 @@ std::vector<Perimeter> extract_perimeter_extrusions(
                     const bool is_hole = loop->is_clockwise();
                     reverse_loop = print.config().get<bool>("prefer_clockwise_movements") ? !is_hole : is_hole;
                 }
+                const std::optional<Point> position_before{previous_position};
                 auto [path, wipe_offset]{smooth_path(&layer, &region, ExtrusionEntityReference{*ee, reverse_loop}, extruder_id, last_position)};
                 previous_position = get_gcode_point(last_position, offset);
-                if (!path.empty()) {
+                if (!keep_smoothed_path(print, path, layer, extruder_id)) {
+                    previous_position = position_before;
+                } else if (!path.empty()) {
                     result.push_back(Perimeter{std::move(path), reverse_loop, ee, wipe_offset});
                 }
             }
@@ -193,8 +225,13 @@ std::vector<InfillRange> extract_infill_ranges(
 
         std::vector<SmoothPath> paths;
         for (const ExtrusionEntityReference &extrusion_reference : sorted_extrusions) {
+            // previous_position is only advanced below, so skipping a rejected path
+            // leaves the head where the last kept extrusion put it.
             std::optional<InstancePoint> last_position{get_instance_point(previous_position, offset)};
             auto [path, _]{smooth_path(&layer, &region, extrusion_reference, extruder_id, last_position)};
+            if (!keep_smoothed_path(print, path, layer, extruder_id)) {
+                continue;
+            }
             if (!path.empty()) {
                 paths.push_back(std::move(path));
             }

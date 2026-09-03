@@ -9,6 +9,7 @@
 #include "Slic3r/Domain/Model.hpp"
 #include "Slic3r/Domain/Preset/SelectedPreset.hpp"
 #include "jthread/JThread.hpp"
+#include "libslic3r/GCode/ExtrusionFilter.hpp"
 #include "libslic3r/GCode/IslandOrdering.hpp"
 #include "libslic3r/GCode/IslandSequencing.hpp"
 #include "libslic3r/IThumbnailImageGenerator.hpp"
@@ -84,6 +85,13 @@ public:
      * FFF prints. See GCode::IslandOrdering for the contract and the threading rules.
      */
     GCode::IslandOrdering::Strategy island_ordering_strategy;
+
+    /**
+     * Decides whether a single extrusion is printed at all, asked about every
+     * perimeter and infill path during G-code export. Empty by default, which keeps
+     * every path. Only used by FFF prints. See GCode::ExtrusionFilter.
+     */
+    GCode::ExtrusionFilter::Predicate extrusion_filter;
 
     /**
      * Optionally schedules connected islands across layer boundaries. Empty by
