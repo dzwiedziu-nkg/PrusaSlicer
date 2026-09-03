@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cinttypes>
 
+#include "libslic3r/GCode/IslandOrdering.hpp"
 #include "libslic3r/GCode/SmoothPath.hpp"
 #include "libslic3r/ShortestPath.hpp"
 #include "libslic3r/ExtrusionEntity.hpp"
@@ -311,7 +312,14 @@ std::vector<SliceExtrusions> get_slices_extrusions(
 
     std::vector<SliceExtrusions> result;
 
-    for (size_t idx : layer.lslice_indices_sorted_by_print_order) {
+    // The print order of the layer's islands goes through the extension point. With no
+    // strategy installed on the print this returns layer.lslice_indices_sorted_by_print_order
+    // unchanged, so the stock behaviour is preserved exactly.
+    const std::vector<size_t> island_order{IslandOrdering::order_islands(
+        print.island_ordering_strategy, layer, offset, extruder_id, previous_position
+    )};
+
+    for (size_t idx : island_order) {
         const LayerSlice &lslice = layer.lslices_ex[idx];
         std::vector<IslandExtrusions> island_extrusions{extract_island_extrusions(
             lslice, print, layer, should_pick_extrusion, smooth_path, offset, extruder_id, previous_position
