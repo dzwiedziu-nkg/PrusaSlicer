@@ -53,7 +53,8 @@ public:
         GCodeGenerator& gcodegen,
         const std::vector<double>& retract_speed,
         double travel_speed,
-        bool toolchange
+        bool toolchange,
+        std::optional<double> max_distance = std::nullopt
     );
 
     // Reduce feedrate a bit; travel speed is often too high to move on existing material.

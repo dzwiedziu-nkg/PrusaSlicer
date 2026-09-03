@@ -144,6 +144,7 @@ enum class WarningCode
     CloseToPrimingRegions,
     ToolpathOutsideBuildVolume,
     GCodeConflict,
+    IslandSequencingCollisionUnchecked,
     XYSizeCompensationIgnoredMultiMaterialPainting,
     XYSizeCompensationIgnoredFuzzySkinPainting,
     VirtualExtruderMixesFilamentTypes
