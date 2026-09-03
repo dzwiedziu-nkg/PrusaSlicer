@@ -15,6 +15,8 @@ using Slic3r::GCode::IslandSequencing::LayerInfo;
 using Slic3r::GCode::IslandSequencing::Plan;
 using Slic3r::GCode::IslandSequencing::PrintContext;
 using Slic3r::GCode::IslandSequencing::Strategy;
+using Slic3r::GCode::IslandSequencing::is_collision_free;
+using Slic3r::GCode::IslandSequencing::supports_collision_check;
 
 namespace {
 
@@ -61,11 +63,39 @@ struct PluginFixture
 
 } // namespace
 
+namespace {
+
+IslandInfo box_island(
+    const std::size_t index,
+    const double min_x,
+    const double min_y,
+    const double max_x,
+    const double max_y
+)
+{
+    const auto mm = [](const double value) {
+        return static_cast<Slic3r::Domain::coord_t>(value * 1000000.);
+    };
+    const Point min{mm(min_x), mm(min_y)};
+    const Point max{mm(max_x), mm(max_y)};
+    return IslandInfo{index, BoundingBox{min, max, true}, (min + max) / 2, {}, {}};
+}
+
+Plan high_island_then_low_island()
+{
+    return Plan{{{1, {0}}, {0, {1}}}, 2., .6};
+}
+
+} // namespace
+
 TEST_CASE_METHOD(PluginFixture, "[IslandSequencePlugin] plan and context are converted")
 {
     const Strategy strategy = strategy_for(R"(
         function plan_islands(layers, ctx)
             if ctx.printer_model ~= "COREONE_INDX8T" then error("bad printer") end
+            if ctx.extruder_clearance_radius ~= 75.0 then error("bad radius") end
+            if ctx.extruder_clearance_height ~= 33.0 then error("bad height") end
+            if ctx.collision_model ~= "unchecked" then error("bad collision model") end
             if layers[1].islands[1].centroid.x ~= 1.0 then error("bad x") end
             if layers[1].islands[1].overlaps_above[2] ~= 2 then error("bad link") end
             return {
@@ -81,7 +111,9 @@ TEST_CASE_METHOD(PluginFixture, "[IslandSequencePlugin] plan and context are con
     )");
     REQUIRE(static_cast<bool>(strategy));
 
-    const std::optional<Plan> plan = strategy(layers(), PrintContext{"COREONE_INDX8T"});
+    const std::optional<Plan> plan = strategy(
+        layers(), PrintContext{"COREONE_INDX8T", 75., 33.}
+    );
     REQUIRE(plan.has_value());
     REQUIRE(plan->steps.size() == 3);
     REQUIRE(plan->steps[1].layer == 1);
@@ -114,4 +146,29 @@ TEST_CASE_METHOD(PluginFixture, "[IslandSequencePlugin] malformed plan disables 
 TEST_CASE_METHOD(PluginFixture, "[IslandSequencePlugin] wrong entry point is rejected")
 {
     REQUIRE_FALSE(static_cast<bool>(strategy_for("function execute(params) end\n")));
+}
+
+TEST_CASE("[IslandSequencePlugin] Core One head collision is detected")
+{
+    const PrintContext core_one{"COREONE", 75., 33.};
+    REQUIRE(supports_collision_check(core_one));
+    REQUIRE_FALSE(supports_collision_check(PrintContext{"COREONE_INDX8T", 75., 33.}));
+
+    const std::vector<LayerInfo> nearby{
+        LayerInfo{0, .4, .2, {
+            box_island(0, 0., 0., 10., 10.),
+            box_island(1, 30., 0., 40., 10.)
+        }},
+        LayerInfo{1, 2., .2, {box_island(0, 0., 0., 10., 10.)}}
+    };
+    REQUIRE_FALSE(is_collision_free(high_island_then_low_island(), nearby, core_one));
+
+    auto far_apart = nearby;
+    far_apart[0].islands[1] = box_island(1, 200., 0., 210., 10.);
+    REQUIRE(is_collision_free(high_island_then_low_island(), far_apart, core_one));
+
+    // At the configured carriage height the X gantry spans the bed, so separating
+    // the islands only along X no longer makes the sequence safe.
+    far_apart[1].print_z = 40.;
+    REQUIRE_FALSE(is_collision_free(high_island_then_low_island(), far_apart, core_one));
 }

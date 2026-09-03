@@ -79,8 +79,7 @@ This is list of recognized `manifest.json` fields.
 The table `info` describes plugin with following keys:
 - `id` (string) plugin unique identifier, recommended is reverse domain name like notation
 - `type` (string) type of plugin, allowed values are `'project.plugin'`,
-  `'slicing.island_order'`, `'slicing.island_sequence'`, and
-  `'slicing.extrusion_filter'`.
+  `'slicing.island_order'`, `'slicing.island_sequence'` and `'slicing.extrusion_filter'`.
 - `title` (string) displayed plugin name
 - `menu` (string) menu item path to register the plugin under _Plugins_ menu item (e.g. `Calibration/My cool pattern`).
   Only used by `project.plugin`.
@@ -218,7 +217,12 @@ function plan_islands(layers, ctx)
     --     overlaps_above = {<1-based island positions on layer i+1>}
     --   }, ...}
     -- }
-    -- ctx = {printer_model = <string>}
+    -- ctx = {
+    --   printer_model = <string>,
+    --   extruder_clearance_radius = <mm>,
+    --   extruder_clearance_height = <mm>,
+    --   collision_model = "coreone_fallback_v1" or "unchecked"
+    -- }
     return {
         steps = {
             {layer = 1, islands = {1}},
@@ -241,8 +245,16 @@ The 1.0.0 engine intentionally applies a plan only to one object with one instan
 supports, wipe tower, infinite skirt, spiral vase, ordinary complete-objects mode, or
 height-based custom G-code. A branch change is performed by retracting with a capped
 wipe on the last extrusion, raising Z, moving XY above the next branch, and only then
-descending. The normal complete-objects collision checker does not model this schedule,
-so an accepted plan always adds a high-severity collision warning.
+descending. The first island step after a downward move emits infill before perimeters,
+using that hidden extrusion as a longer model-contained wipe.
+
+For `printer_model == "COREONE"`, the engine checks the returned schedule with the same
+three-slice fallback geometry as PrusaSlicer's sequential-object arranger: a 10 x 10 mm
+nozzle footprint at 0 mm, the configured clearance-radius square at 1 mm, and an X gantry
+at the configured clearance height. A colliding plan is rejected. Other printers still
+receive `collision_model = "unchecked"`, and an accepted plan adds a high-severity warning
+because the ordinary complete-objects checker does not model islands starting above the
+bed.
 
 At most one `slicing.island_sequence` plugin is used at a time. It may coexist with a
 `slicing.island_order` plugin; the latter sees only the islands selected for the current

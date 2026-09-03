@@ -267,7 +267,8 @@ std::vector<IslandExtrusions> extract_island_extrusions(
     const PathSmoothingFunction &smooth_path,
     const Point &offset,
     const unsigned extruder_id,
-    std::optional<Point> &previous_position
+    std::optional<Point> &previous_position,
+    const bool force_infill_first
 ) {
     const auto should_pick_infill = [&should_pick_extrusion](const ExtrusionEntityCollection &eec, const PrintRegion &region) {
         return should_pick_extrusion(eec, region) && eec.role() != ExtrusionRole::Ironing;
@@ -285,9 +286,10 @@ std::vector<IslandExtrusions> extract_island_extrusions(
 
         result.push_back(IslandExtrusions{&region});
         IslandExtrusions &island_extrusions{result.back()};
-        island_extrusions.infill_first = print.config().get<bool>("infill_first");
+        island_extrusions.infill_first = force_infill_first
+            || print.config().get<bool>("infill_first");
 
-        if (print.config().get<bool>("infill_first")) {
+        if (island_extrusions.infill_first) {
             island_extrusions.infill_ranges = extract_infill_ranges(
                 print, layer, island, offset, previous_position, should_pick_infill, smooth_path, extruder_id
             );
@@ -340,7 +342,8 @@ std::vector<SliceExtrusions> get_slices_extrusions(
     const Point &offset,
     const unsigned extruder_id,
     std::optional<Point> &previous_position,
-    const std::vector<std::size_t>* selected_indices
+    const std::vector<std::size_t>* selected_indices,
+    const bool force_infill_first
 ) {
     // Note: ironing.
     // FIXME move ironing into the loop above over LayerIslands?
@@ -361,7 +364,8 @@ std::vector<SliceExtrusions> get_slices_extrusions(
     for (size_t idx : island_order) {
         const LayerSlice &lslice = layer.lslices_ex[idx];
         std::vector<IslandExtrusions> island_extrusions{extract_island_extrusions(
-            lslice, print, layer, should_pick_extrusion, smooth_path, offset, extruder_id, previous_position
+            lslice, print, layer, should_pick_extrusion, smooth_path, offset, extruder_id,
+            previous_position, force_infill_first
         )};
         std::vector<InfillRange> ironing_extrusions{extract_ironing_extrusions(
             lslice, print, layer, should_pick_extrusion, smooth_path, offset, extruder_id, previous_position
@@ -484,7 +488,8 @@ std::vector<OverridenExtrusions> get_overriden_extrusions(
             std::vector<SliceExtrusions> slices_extrusions{get_slices_extrusions(
                 print, *layer, should_pick_extrusion, smooth_path, offset, extruder_id,
                 previous_position, layers[instance.object_layer_to_print_id].island_indices ?
-                    &*layers[instance.object_layer_to_print_id].island_indices : nullptr
+                    &*layers[instance.object_layer_to_print_id].island_indices : nullptr,
+                layers[instance.object_layer_to_print_id].force_infill_first
             )};
             result.push_back({offset, std::move(slices_extrusions)});
         }
@@ -543,7 +548,8 @@ std::vector<NormalExtrusions> get_normal_extrusions(
                 extruder_id,
                 previous_position,
                 layers[instance.object_layer_to_print_id].island_indices ?
-                    &*layers[instance.object_layer_to_print_id].island_indices : nullptr
+                    &*layers[instance.object_layer_to_print_id].island_indices : nullptr,
+                layers[instance.object_layer_to_print_id].force_infill_first
             );
         }
     }
