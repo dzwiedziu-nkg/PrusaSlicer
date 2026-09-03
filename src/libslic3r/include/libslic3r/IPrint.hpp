@@ -9,6 +9,7 @@
 #include "Slic3r/Domain/Model.hpp"
 #include "Slic3r/Domain/Preset/SelectedPreset.hpp"
 #include "jthread/JThread.hpp"
+#include "libslic3r/GCode/IslandOrdering.hpp"
 #include "libslic3r/IThumbnailImageGenerator.hpp"
 #include "libslic3r/PrintSteps.hpp"
 #include "libslic3r/SlicingStatus.hpp"
@@ -75,6 +76,13 @@ public:
     std::function<void(Biz::Slicing::Progress)> progress_callback{[](Biz::Slicing::Progress) {}};
     std::function<void(Biz::Slicing::Warning)> append_warning_callback{
         [](Biz::Slicing::Warning) {}};
+
+    /**
+     * Decides the print order of the islands of a layer during G-code export.
+     * Empty by default, which keeps the order chained at slicing time. Only used by
+     * FFF prints. See GCode::IslandOrdering for the contract and the threading rules.
+     */
+    GCode::IslandOrdering::Strategy island_ordering_strategy;
 };
 
 struct ValidationResult
