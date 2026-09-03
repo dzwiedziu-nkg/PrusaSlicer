@@ -339,7 +339,8 @@ std::vector<SliceExtrusions> get_slices_extrusions(
     const PathSmoothingFunction &smooth_path,
     const Point &offset,
     const unsigned extruder_id,
-    std::optional<Point> &previous_position
+    std::optional<Point> &previous_position,
+    const std::vector<std::size_t>* selected_indices
 ) {
     // Note: ironing.
     // FIXME move ironing into the loop above over LayerIslands?
@@ -353,7 +354,8 @@ std::vector<SliceExtrusions> get_slices_extrusions(
     // strategy installed on the print this returns layer.lslice_indices_sorted_by_print_order
     // unchanged, so the stock behaviour is preserved exactly.
     const std::vector<size_t> island_order{IslandOrdering::order_islands(
-        print.island_ordering_strategy, layer, offset, extruder_id, previous_position
+        print.island_ordering_strategy, layer, offset, extruder_id, previous_position,
+        selected_indices
     )};
 
     for (size_t idx : island_order) {
@@ -480,7 +482,9 @@ std::vector<OverridenExtrusions> get_overriden_extrusions(
             const Point offset{print_object.instances()[instance.instance_id].shift()};
 
             std::vector<SliceExtrusions> slices_extrusions{get_slices_extrusions(
-                print, *layer, should_pick_extrusion, smooth_path, offset, extruder_id, previous_position
+                print, *layer, should_pick_extrusion, smooth_path, offset, extruder_id,
+                previous_position, layers[instance.object_layer_to_print_id].island_indices ?
+                    &*layers[instance.object_layer_to_print_id].island_indices : nullptr
             )};
             result.push_back({offset, std::move(slices_extrusions)});
         }
@@ -537,7 +541,9 @@ std::vector<NormalExtrusions> get_normal_extrusions(
                 smooth_path,
                 offset,
                 extruder_id,
-                previous_position
+                previous_position,
+                layers[instance.object_layer_to_print_id].island_indices ?
+                    &*layers[instance.object_layer_to_print_id].island_indices : nullptr
             );
         }
     }

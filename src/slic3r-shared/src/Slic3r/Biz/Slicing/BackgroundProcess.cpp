@@ -9,6 +9,7 @@
 
 #include "Slic3r/App/Lua/ExtrusionFilterPlugin.hpp"
 #include "Slic3r/App/Lua/IslandOrderPlugin.hpp"
+#include "Slic3r/App/Lua/IslandSequencePlugin.hpp"
 #include "Slic3r/Directories.hpp"
 #include "Slic3r/Utils.hpp"
 #include "Slic3r/Version.hpp"
@@ -254,6 +255,9 @@ void BackgroundProcess::slice(
                 );
                 // A plugin may also drop extrusions that are not worth the travel to reach them.
                 print->extrusion_filter = App::Lua::make_extrusion_filter(
+                    {resources_dir() + "/lua", data_dir() + "/lua"}
+                );
+                print->island_sequencing_strategy = App::Lua::make_island_sequence_strategy(
                     {resources_dir() + "/lua", data_dir() + "/lua"}
                 );
 

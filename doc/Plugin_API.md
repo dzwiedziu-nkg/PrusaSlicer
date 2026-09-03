@@ -54,8 +54,8 @@ Here is an example of bundled plugin manifest:
 }
 ```
 
-The recognized `required_apis` keys are `project.plugin`, `slicing.island_order`
-and `slicing.extrusion_filter`, all at version `1.0.0`.
+The recognized `required_apis` keys are `project.plugin`, `slicing.island_order`,
+`slicing.island_sequence` and `slicing.extrusion_filter`, all at version `1.0.0`.
 
 This is list of recognized `manifest.json` fields. 
 
@@ -79,7 +79,8 @@ This is list of recognized `manifest.json` fields.
 The table `info` describes plugin with following keys:
 - `id` (string) plugin unique identifier, recommended is reverse domain name like notation
 - `type` (string) type of plugin, allowed values are `'project.plugin'`,
-  `'slicing.island_order'` and `'slicing.extrusion_filter'`.
+  `'slicing.island_order'`, `'slicing.island_sequence'`, and
+  `'slicing.extrusion_filter'`.
 - `title` (string) displayed plugin name
 - `menu` (string) menu item path to register the plugin under _Plugins_ menu item (e.g. `Calibration/My cool pattern`).
   Only used by `project.plugin`.
@@ -193,6 +194,59 @@ so a plugin never has to think about concurrency.
 
 At most one `slicing.island_order` plugin is used at a time. If several are installed, the
 first by plugin id wins and the others are ignored with a warning in the log.
+
+### `slicing.island_sequence`
+
+Builds a cross-layer schedule for connected islands of one object. It is intended for
+parts which share a base and later split into independent branches. Its entry point is
+`plan_islands(layers, ctx)`:
+
+```lua
+info = {
+    id = "island_sequence",
+    type = "slicing.island_sequence",
+    title = "Sequential upper islands"
+}
+
+function plan_islands(layers, ctx)
+    -- layers[i] = {
+    --   layer_id = <integer>, print_z = <mm>, height = <mm>,
+    --   islands = {{
+    --     centroid = {x = <mm>, y = <mm>},
+    --     bbox = {min_x = <mm>, min_y = <mm>, max_x = <mm>, max_y = <mm>},
+    --     overlaps_below = {<1-based island positions on layer i-1>},
+    --     overlaps_above = {<1-based island positions on layer i+1>}
+    --   }, ...}
+    -- }
+    -- ctx = {printer_model = <string>}
+    return {
+        steps = {
+            {layer = 1, islands = {1}},
+            {layer = 2, islands = {1}},
+            {layer = 2, islands = {2}}
+        },
+        wipe_distance = 2.0, -- mm, allowed range 0..20
+        z_clearance = 0.6    -- mm, allowed range 0..10
+    }
+end
+```
+
+`layer` and every item in `islands` are 1-based positions into the supplied arrays. A
+valid schedule emits every island exactly once. Before an island is emitted, all its
+`overlaps_below` dependencies must already have been emitted. Invalid plans and `nil`
+both preserve normal layer-by-layer printing; a Lua error disables the plugin for that
+export.
+
+The 1.0.0 engine intentionally applies a plan only to one object with one instance and no
+supports, wipe tower, infinite skirt, spiral vase, ordinary complete-objects mode, or
+height-based custom G-code. A branch change is performed by retracting with a capped
+wipe on the last extrusion, raising Z, moving XY above the next branch, and only then
+descending. The normal complete-objects collision checker does not model this schedule,
+so an accepted plan always adds a high-severity collision warning.
+
+At most one `slicing.island_sequence` plugin is used at a time. It may coexist with a
+`slicing.island_order` plugin; the latter sees only the islands selected for the current
+schedule step.
 
 ### `slicing.extrusion_filter`
 

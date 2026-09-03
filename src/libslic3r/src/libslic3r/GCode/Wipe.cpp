@@ -5,6 +5,7 @@
 #include <cmath>
 #include <iterator>
 #include <cinttypes>
+#include <limits>
 
 #include "../GCode.hpp"
 #include "Slic3r/Biz/libpgcode/Utils.hpp"
@@ -76,7 +77,8 @@ std::string Wipe::wipe(
     GCodeGenerator& gcodegen,
     const std::vector<double>& retract_speed,
     double travel_speed,
-    bool toolchange
+    bool toolchange,
+    const std::optional<double> max_distance
 )
 {
     std::string gcode;
@@ -89,6 +91,7 @@ std::string Wipe::wipe(
         // Delayed emitting of a wipe start tag.
         bool wiped = false;
         const double wipe_speed = this->calc_wipe_speed(travel_speed);
+        double remaining_distance = max_distance.value_or(std::numeric_limits<double>::infinity());
         auto start_wipe = [&wiped, &gcode, &gcodegen, wipe_speed](){
             if (! wiped) {
                 wiped = true;
@@ -97,16 +100,28 @@ std::string Wipe::wipe(
             }
         };
         const double xy_to_e    = this->calc_xy_to_e_ratio(retract_speed, travel_speed, extruder.id());
-        auto         wipe_linear = [&gcode, &gcodegen, &retract_length, xy_to_e](const Vec2d &prev_quantized, Vec2d &p) {
+        auto wipe_linear = [
+            &gcode, &gcodegen, &retract_length, &remaining_distance, xy_to_e
+        ](const Vec2d &prev_quantized, Vec2d &p) {
             Vec2d  p_quantized = GCodeFormatter::quantize(p);
             if (p_quantized == prev_quantized) {
                 p = p_quantized;
                 return false;
             }
             double segment_length = (p_quantized - prev_quantized).norm();
+            bool distance_done = false;
+            if (segment_length > remaining_distance + EPSILON) {
+                p = GCodeFormatter::quantize(
+                    Vec2d(prev_quantized + (p - prev_quantized) *
+                        (remaining_distance / segment_length))
+                );
+                p_quantized = p;
+                segment_length = (p_quantized - prev_quantized).norm();
+                distance_done = true;
+            }
             // Quantize E axis as it is to be extruded as a whole segment.
             double dE = GCodeFormatter::quantize_e(xy_to_e * segment_length);
-            bool   done = false;
+            bool   done = distance_done;
             if (dE > retract_length - EPSILON) {
                 if (dE > retract_length + EPSILON)
                     // Shorten the segment.
@@ -119,9 +134,13 @@ std::string Wipe::wipe(
                 p = p_quantized;
             gcode += gcodegen.writer().extrude_to_xy(p, -dE, wipe_retract_comment);
             retract_length -= dE;
+            remaining_distance = std::max(0., remaining_distance - segment_length);
+            done = done || remaining_distance <= EPSILON;
             return done;
         };
-        auto         wipe_arc = [&gcode, &gcodegen, &retract_length, xy_to_e, &wipe_linear](
+        auto wipe_arc = [
+            &gcode, &gcodegen, &retract_length, &remaining_distance, xy_to_e, &wipe_linear
+        ](
             const Vec2d &prev_quantized, Vec2d &p, double radius_in, const bool ccw) {
             Vec2d  p_quantized = GCodeFormatter::quantize(p);
             if (p_quantized == prev_quantized) {
@@ -137,8 +156,19 @@ std::string Wipe::wipe(
             float  angle  = Geometry::ArcWelder::arc_angle(prev_quantized.cast<double>(), p_quantized.cast<double>(), double(radius));
             assert(angle > 0);
             double segment_length = angle * std::abs(radius);
+            bool distance_done = false;
+            if (segment_length > remaining_distance + EPSILON) {
+                p = GCodeFormatter::quantize(
+                    Vec2d(center + Eigen::Rotation2D(
+                        (ccw ? angle : -angle) * (remaining_distance / segment_length)
+                    ) * (prev_quantized - center))
+                );
+                p_quantized = p;
+                segment_length = remaining_distance;
+                distance_done = true;
+            }
             double dE = GCodeFormatter::quantize_e(xy_to_e * segment_length);
-            bool   done = false;
+            bool   done = distance_done;
             if (dE > retract_length - EPSILON) {
                 if (dE > retract_length + EPSILON) {
                     // Shorten the segment. Recalculate the arc from the unquantized end coordinate.
@@ -166,6 +196,8 @@ std::string Wipe::wipe(
                     p, ij, ccw, -dE, wipe_retract_comment);
             }
             retract_length -= dE;
+            remaining_distance = std::max(0., remaining_distance - segment_length);
+            done = done || remaining_distance <= EPSILON;
             return done;
         };
         // Start with the current position, which may be different from the wipe path start in case of loop clipping.

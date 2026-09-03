@@ -24,6 +24,7 @@ enum class PluginApiType
 {
     Project,
     SlicingIslandOrder,
+    SlicingIslandSequence,
     SlicingExtrusionFilter
 };
 

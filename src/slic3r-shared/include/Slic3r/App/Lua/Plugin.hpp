@@ -16,6 +16,7 @@ enum class PluginType
 {
     ProjectPlugin,
     SlicingIslandOrder,
+    SlicingIslandSequence,
     SlicingExtrusionFilter
 };
 

@@ -80,7 +80,11 @@ using Strategy = std::function<
 /**
  * @brief Describes @p layer's islands in the G-code frame, in stock print order.
  */
-std::vector<IslandInfo> describe_islands(const Layer& layer, const Domain::Point& instance_offset);
+std::vector<IslandInfo> describe_islands(
+    const Layer& layer,
+    const Domain::Point& instance_offset,
+    const std::vector<std::size_t>* selected_indices = nullptr
+);
 
 /**
  * @brief Runs @p strategy and returns lslice indices in print order.
@@ -94,7 +98,8 @@ std::vector<std::size_t> order_islands(
     const Layer& layer,
     const Domain::Point& instance_offset,
     unsigned extruder_id,
-    const std::optional<Domain::Point>& head_position
+    const std::optional<Domain::Point>& head_position,
+    const std::vector<std::size_t>* selected_indices = nullptr
 );
 
 /**

@@ -1251,6 +1251,8 @@ set(SLIC3R_SHARED_FILES
         src/Slic3r/App/Lua/ExtrusionFilterPlugin.cpp
         include/Slic3r/App/Lua/IslandOrderPlugin.hpp
         src/Slic3r/App/Lua/IslandOrderPlugin.cpp
+        include/Slic3r/App/Lua/IslandSequencePlugin.hpp
+        src/Slic3r/App/Lua/IslandSequencePlugin.cpp
         include/Slic3r/App/Lua/PackageRegistry.hpp
         src/Slic3r/App/Lua/PackageRegistry.cpp
         include/Slic3r/App/Lua/Plugin.hpp
@@ -1536,8 +1538,9 @@ if(SLIC3R_BUILD_TESTS)
 
             test/Slic3r/App/DialogNavigationTests.cpp
 
-            test/Slic3r/App/Lua/ExtrusionFilterPluginTests.cpp
             test/Slic3r/App/Lua/IslandOrderPluginTests.cpp
+            test/Slic3r/App/Lua/ExtrusionFilterPluginTests.cpp
+            test/Slic3r/App/Lua/IslandSequencePluginTests.cpp
 
             test/Slic3r/App/Scene/Node.cpp
             test/Slic3r/App/Scene/Ray.cpp
