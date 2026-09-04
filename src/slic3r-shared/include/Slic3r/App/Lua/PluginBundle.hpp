@@ -25,7 +25,8 @@ enum class PluginApiType
     Project,
     SlicingIslandOrder,
     SlicingIslandSequence,
-    SlicingExtrusionFilter
+    SlicingExtrusionFilter,
+    SlicingFillPlanner
 };
 
 std::string to_string(PluginApiType pat);

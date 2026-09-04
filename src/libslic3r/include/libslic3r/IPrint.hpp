@@ -10,6 +10,7 @@
 #include "Slic3r/Domain/Preset/SelectedPreset.hpp"
 #include "jthread/JThread.hpp"
 #include "libslic3r/GCode/ExtrusionFilter.hpp"
+#include "libslic3r/Fill/FillPlanner.hpp"
 #include "libslic3r/GCode/IslandOrdering.hpp"
 #include "libslic3r/GCode/IslandSequencing.hpp"
 #include "libslic3r/IThumbnailImageGenerator.hpp"
@@ -92,6 +93,14 @@ public:
      * every path. Only used by FFF prints. See GCode::ExtrusionFilter.
      */
     GCode::ExtrusionFilter::Predicate extrusion_filter;
+
+    /**
+     * Generates the fill paths of a surface in place of the stock pattern, asked about
+     * every surface during slicing. Empty by default, which keeps the stock paths. Only
+     * used by FFF prints. See FillPlanner - note that unlike the G-code hooks this one
+     * is called concurrently from several threads.
+     */
+    FillPlanner::Strategy fill_planner;
 
     /**
      * Optionally schedules connected islands across layer boundaries. Empty by

@@ -160,6 +160,7 @@ set(SLIC3R_SOURCES
     src/libslic3r/Fill/FillLine.hpp
     src/libslic3r/Fill/FillPlanePath.cpp
     src/libslic3r/Fill/FillPlanePath.hpp
+    src/libslic3r/Fill/FillPlanner.cpp
     src/libslic3r/Fill/FillRectilinear.cpp
     src/libslic3r/Fill/FillRectilinear.hpp
     src/libslic3r/Fill/Lightning/DistanceField.cpp
@@ -418,6 +419,7 @@ set(SLIC3R_SOURCES
 set(SLIC3R_PUBLIC_HEADERS
     include/libslic3r/CustomGCode.hpp
     include/libslic3r/ExtruderCandidates.hpp
+    include/libslic3r/Fill/FillPlanner.hpp
     include/libslic3r/GCode/ExtrusionFilter.hpp
     include/libslic3r/GCode/IslandOrdering.hpp
     include/libslic3r/GCode/IslandSequencing.hpp
