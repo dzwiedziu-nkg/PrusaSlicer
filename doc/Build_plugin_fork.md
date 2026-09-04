@@ -2,7 +2,11 @@
 
 This is a fork of PrusaSlicer `3.0.0-alpha11` that adds **slicing plugin hooks** — four
 extension points that let a Lua plugin influence slicing itself, which the released
-plugin system cannot do. See `doc/Plugin_API.md` for the API and the plugins that use it:
+plugin system cannot do.
+
+**Build `main`.** It carries every hook, so every plugin below works. The `pr*` branches
+carry one hook each and are there to be read, not to be run. See `doc/Plugin_API.md` for the
+API and the plugins that use it:
 
 - [island-order-plugin](https://github.com/dzwiedziu-nkg/island-order-plugin) — the print order of a layer's islands
 - [short-extrusion-plugin](https://github.com/dzwiedziu-nkg/short-extrusion-plugin) — drops extrusions not worth the travel to reach them
