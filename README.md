@@ -1,8 +1,11 @@
 > ### This is a fork, not PrusaSlicer
 >
 > It adds **slicing plugin hooks**: four extension points that let a Lua plugin influence
-> slicing itself, which the released plugin system cannot do. The branch to use is
-> `feature/island-ordering-plugin-api`.
+> slicing itself, which the released plugin system cannot do.
+>
+> **`main` is the whole thing** — every hook, so every plugin below works. Build that one.
+> The `pr*` branches carry one hook each; they exist so the changes for a single plugin can
+> be read on their own, and are frozen snapshots of what was offered upstream.
 >
 > - **[How to build and run this fork](doc/Build_plugin_fork.md)** — including where the
 >   built binary actually is, which is not obvious
