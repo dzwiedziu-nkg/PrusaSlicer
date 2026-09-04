@@ -1,3 +1,22 @@
+> ### This is a fork, not PrusaSlicer
+>
+> It adds **slicing plugin hooks**: four extension points that let a Lua plugin influence
+> slicing itself, which the released plugin system cannot do. The branch to use is
+> `feature/island-ordering-plugin-api`.
+>
+> - **[How to build and run this fork](doc/Build_plugin_fork.md)** — including where the
+>   built binary actually is, which is not obvious
+> - [The plugin API](doc/Plugin_API.md)
+> - Plugins built on it: [island order](https://github.com/dzwiedziu-nkg/island-order-plugin),
+>   [short extrusions](https://github.com/dzwiedziu-nkg/short-extrusion-plugin),
+>   [sequential islands](https://github.com/dzwiedziu-nkg/sequential-islands-plugin),
+>   [radial bridges](https://github.com/dzwiedziu-nkg/radial-bridge-plugin)
+>
+> Prusa have said they intend to expose the slicing pipeline to plugins themselves. When
+> they do, these changes should go away and the plugins should target their interface.
+> The installation advice below is upstream's and refers to official releases, which do
+> **not** contain any of this.
+
 ![PrusaSlicer logo](/resources/icons/PrusaSlicer_128px.png)
 
 # PrusaSlicer
