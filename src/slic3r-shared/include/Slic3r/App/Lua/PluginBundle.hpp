@@ -26,7 +26,8 @@ enum class PluginApiType
     PrintMode,
     SlicingIslandOrder,
     SlicingIslandSequence,
-    SlicingExtrusionFilter
+    SlicingExtrusionFilter,
+    SlicingFillPlanner
 };
 
 std::string to_string(PluginApiType pat);

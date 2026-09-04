@@ -20,7 +20,8 @@ enum class PluginType
     PrintMode,
     SlicingIslandOrder,
     SlicingIslandSequence,
-    SlicingExtrusionFilter
+    SlicingExtrusionFilter,
+    SlicingFillPlanner
 };
 
 tl::expected<PluginType, std::string> parse_plugin_type(std::string_view s);
