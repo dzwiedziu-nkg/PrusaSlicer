@@ -8,6 +8,7 @@
 #include "Slic3r/Biz/Config/GCodeMetadataJson.hpp" // IWYU pragma: keep
 
 #include "Slic3r/App/Lua/ExtrusionFilterPlugin.hpp"
+#include "Slic3r/App/Lua/FillPlannerPlugin.hpp"
 #include "Slic3r/App/Lua/IslandOrderPlugin.hpp"
 #include "Slic3r/App/Lua/IslandSequencePlugin.hpp"
 #include "Slic3r/Directories.hpp"
@@ -255,6 +256,10 @@ void BackgroundProcess::slice(
                 );
                 // A plugin may also drop extrusions that are not worth the travel to reach them.
                 print->extrusion_filter = App::Lua::make_extrusion_filter(
+                    {resources_dir() + "/lua", data_dir() + "/lua"}
+                );
+                // And a plugin may lay a surface out differently than the stock pattern.
+                print->fill_planner = App::Lua::make_fill_planner(
                     {resources_dir() + "/lua", data_dir() + "/lua"}
                 );
                 print->island_sequencing_strategy = App::Lua::make_island_sequence_strategy(

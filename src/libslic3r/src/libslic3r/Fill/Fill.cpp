@@ -23,6 +23,7 @@
 // for Arachne based infills
 #include "libslic3r/PerimeterGenerator.hpp"
 #include "libslic3r/Fill/FillBase.hpp"
+#include "libslic3r/Fill/FillPlanner.hpp"
 #include "libslic3r/Fill/FillRectilinear.hpp"
 #include "libslic3r/Fill/FillLightning.hpp"
 #include "libslic3r/Fill/FillEnsuring.hpp"
@@ -481,6 +482,9 @@ void Layer::make_fills(FillAdaptive::Octree* adaptive_fill_octree, FillAdaptive:
     const Domain::BoundingBox2crd bbox                = this->object()->bounding_box();
     const auto                    resolution          = this->object()->print()->config().get<double>("gcode_resolution");
     const auto                    perimeter_generator = this->object()->config().get<Domain::PerimeterGeneratorType>("perimeter_generator");
+    // A plugin may lay a surface out differently, for instance running a bridge
+    // radially rather than in one direction. Empty unless one is installed.
+    const FillPlanner::Strategy& fill_planner       = this->object()->print()->fill_planner;
 
 #ifdef SLIC3R_DEBUG_SLICE_PROCESSING
 	{
@@ -562,6 +566,20 @@ void Layer::make_fills(FillAdaptive::Octree* adaptive_fill_octree, FillAdaptive:
 				    polylines = f->fill_surface(&surface_fill.surface, params);
 			} catch (InfillFailedException &) {
 			}
+            // Arachne fills carry a width per point, which the planner contract cannot
+            // express, so those are left to the stock pattern.
+            if (fill_planner && !params.use_arachne) {
+                const FillPlanner::SurfaceInfo info{
+                    extrusion_role_to_gcode_extrusion_role(surface_fill.params.extrusion_role),
+                    surface_fill.surface.expolygon,
+                    this->id(),
+                    this->print_z,
+                    params.extruder_id,
+                    surface_fill.params.spacing,
+                    surface_fill.params.bridge ? double(surface_fill.params.bridge_angle) : -1.
+                };
+                polylines = FillPlanner::plan_fill(fill_planner, info, std::move(polylines));
+            }
             if (!polylines.empty() || !thick_polylines.empty()) {
                 // calculate actual flow from spacing (which might have been adjusted by the infill
 		        // pattern generator)
