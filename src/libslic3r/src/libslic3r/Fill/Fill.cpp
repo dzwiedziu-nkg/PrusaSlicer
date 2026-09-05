@@ -566,6 +566,9 @@ void Layer::make_fills(FillAdaptive::Octree* adaptive_fill_octree, FillAdaptive:
 				    polylines = f->fill_surface(&surface_fill.surface, params);
 			} catch (InfillFailedException &) {
 			}
+            // How much the planner asked the flow to be scaled by; 1 unless one is
+            // installed and claimed this surface.
+            double planned_flow_ratio = 1.;
             // Arachne fills carry a width per point, which the planner contract cannot
             // express, so those are left to the stock pattern.
             if (fill_planner && !params.use_arachne) {
@@ -578,7 +581,9 @@ void Layer::make_fills(FillAdaptive::Octree* adaptive_fill_octree, FillAdaptive:
                     surface_fill.params.spacing,
                     surface_fill.params.bridge ? double(surface_fill.params.bridge_angle) : -1.
                 };
-                polylines = FillPlanner::plan_fill(fill_planner, info, std::move(polylines));
+                FillPlanner::Plan plan = FillPlanner::plan_fill(fill_planner, info, std::move(polylines));
+                polylines             = std::move(plan.paths);
+                planned_flow_ratio    = plan.flow_ratio;
             }
             if (!polylines.empty() || !thick_polylines.empty()) {
                 // calculate actual flow from spacing (which might have been adjusted by the infill
@@ -594,6 +599,16 @@ void Layer::make_fills(FillAdaptive::Octree* adaptive_fill_octree, FillAdaptive:
 		        	flow_mm3_per_mm = new_flow.mm3_per_mm();
 		        	flow_width      = new_flow.width();
 		        }
+                // A planner that laid the surface out at some other line spacing needs the
+                // flow to follow, or the paths carry the material the stock spacing called
+                // for. Scaled the way bridge_flow_ratio is: the cross section follows the
+                // ratio, and the width with it - as its square root for a bridge, which is
+                // a round strand, linearly for a rectangular extrusion.
+                if (planned_flow_ratio != 1.) {
+                    flow_mm3_per_mm *= planned_flow_ratio;
+                    flow_width *= surface_fill.params.bridge ? std::sqrt(planned_flow_ratio)
+                                                             : planned_flow_ratio;
+                }
                 // Save into layer.
                 ExtrusionEntityCollection *eec        = new ExtrusionEntityCollection();
                 auto                       fill_begin = uint32_t(layerm.fills().size());

@@ -133,7 +133,7 @@ public:
         }
     }
 
-    std::optional<Domain::Polylines> operator()(const SurfaceInfo& surface)
+    std::optional<FillPlanner::Plan> operator()(const SurfaceInfo& surface)
     {
         const std::lock_guard<std::mutex> guard{m_mutex};
         if (m_disabled) {
@@ -175,17 +175,54 @@ public:
             return std::nullopt;
         }
 
-        std::optional<Domain::Polylines> paths = to_polylines(returned.as<sol::table>());
-        if (!paths.has_value()) {
+        std::optional<FillPlanner::Plan> plan = to_plan(returned.as<sol::table>());
+        if (!plan.has_value()) {
             disable("plan_fill() answered with something that is not a list of paths");
             return std::nullopt;
         }
         ++m_planned;
-        return paths;
+        return plan;
     }
 
 private:
-    /** @brief Converts the answer, or nothing when it is not shaped like paths. */
+    /**
+     * @brief Converts the answer, or nothing when it is not shaped like a plan.
+     *
+     * Two shapes are accepted. A plain list of paths is filled at the flow the slicer
+     * worked out, which is what a planner keeping the stock line spacing wants. A table
+     * carrying the paths under `paths` may also name a `flow_ratio` for them.
+     */
+    static std::optional<FillPlanner::Plan> to_plan(const sol::table& answer)
+    {
+        const sol::object paths_field = answer["paths"];
+        if (paths_field.get_type() == sol::type::none
+            || paths_field.get_type() == sol::type::nil) {
+            std::optional<Domain::Polylines> paths = to_polylines(answer);
+            if (!paths.has_value()) {
+                return std::nullopt;
+            }
+            return FillPlanner::Plan{std::move(*paths)};
+        }
+        if (paths_field.get_type() != sol::type::table) {
+            return std::nullopt;
+        }
+
+        std::optional<Domain::Polylines> paths = to_polylines(paths_field.as<sol::table>());
+        if (!paths.has_value()) {
+            return std::nullopt;
+        }
+
+        const sol::object ratio = answer["flow_ratio"];
+        if (ratio.get_type() == sol::type::none || ratio.get_type() == sol::type::nil) {
+            return FillPlanner::Plan{std::move(*paths)};
+        }
+        if (ratio.get_type() != sol::type::number) {
+            return std::nullopt;
+        }
+        return FillPlanner::Plan{std::move(*paths), ratio.as<double>()};
+    }
+
+    /** @brief Converts a list of paths, or nothing when it is not shaped like one. */
     static std::optional<Domain::Polylines> to_polylines(const sol::table& answer)
     {
         Domain::Polylines paths;
