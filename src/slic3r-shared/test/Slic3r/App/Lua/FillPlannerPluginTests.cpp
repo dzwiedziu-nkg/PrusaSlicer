@@ -85,11 +85,48 @@ TEST_CASE_METHOD(PluginFixture, "[FillPlannerPlugin] returned paths replace the 
     const ExPolygon region = square();
     const auto planned = planner(surface(region, GCodeExtrusionRole::BridgeInfill));
     REQUIRE(planned.has_value());
-    REQUIRE(planned->size() == 1);
-    REQUIRE(planned->front().size() == 2);
+    REQUIRE(planned->paths.size() == 1);
+    REQUIRE(planned->paths.front().size() == 2);
+    // A bare list of paths asks for no change to the flow.
+    REQUIRE(planned->flow_ratio == 1.);
 
     // A role the plugin declines keeps the slicer's own paths.
     REQUIRE_FALSE(planner(surface(region, GCodeExtrusionRole::SolidInfill)).has_value());
+}
+
+TEST_CASE_METHOD(PluginFixture, "[FillPlannerPlugin] a plan may ask for a different flow")
+{
+    const Strategy planner = planner_for(R"(
+        function plan_fill(surface)
+            return {
+                paths = {{{x = 1.0, y = 1.0}, {x = 9.0, y = 9.0}}},
+                flow_ratio = 0.8
+            }
+        end
+    )");
+    REQUIRE(static_cast<bool>(planner));
+
+    const ExPolygon region = square();
+    const auto planned = planner(surface(region, GCodeExtrusionRole::BridgeInfill));
+    REQUIRE(planned.has_value());
+    REQUIRE(planned->paths.size() == 1);
+    REQUIRE(planned->flow_ratio == 0.8);
+}
+
+TEST_CASE_METHOD(PluginFixture, "[FillPlannerPlugin] a flow ratio that is not a number is refused")
+{
+    const Strategy planner = planner_for(R"(
+        function plan_fill(surface)
+            return {
+                paths = {{{x = 1.0, y = 1.0}, {x = 9.0, y = 9.0}}},
+                flow_ratio = "thick"
+            }
+        end
+    )");
+    REQUIRE(static_cast<bool>(planner));
+
+    const ExPolygon region = square();
+    REQUIRE_FALSE(planner(surface(region, GCodeExtrusionRole::BridgeInfill)).has_value());
 }
 
 TEST_CASE_METHOD(PluginFixture, "[FillPlannerPlugin] the surface reaches the plugin")

@@ -53,21 +53,42 @@ struct SurfaceInfo
     double bridge_angle;
 };
 
+/** @brief How far from the slicer's own flow a strategy is allowed to ask to go. */
+constexpr double MIN_FLOW_RATIO = 0.05;
+constexpr double MAX_FLOW_RATIO = 5.;
+
+/** @brief How one surface is to be filled. */
+struct Plan
+{
+    /** @brief The paths to extrude, scaled, in the frame of SurfaceInfo::region. */
+    Domain::Polylines paths;
+    /**
+     * @brief Multiplies the extrusion the slicer computed for this surface.
+     *
+     * The flow follows from the line spacing: the slicer works out how much plastic a
+     * millimetre of path has to carry to cover the surface at SurfaceInfo::spacing. A
+     * strategy that lays its paths out at some other spacing - a fan of spokes has no
+     * single spacing at all - puts down the wrong amount unless the flow follows, and
+     * only the strategy knows by how much. 1.0 keeps the flow the slicer computed;
+     * anything outside MIN_FLOW_RATIO..MAX_FLOW_RATIO is clamped into it.
+     */
+    double flow_ratio{1.};
+};
+
 /**
- * @brief Answers with the paths to extrude, or nothing to keep the slicer's own.
+ * @brief Answers with how to fill the surface, or nothing to keep the slicer's own paths.
  *
  * Coordinates are scaled, in the same frame as SurfaceInfo::region.
  */
-using Strategy = std::function<std::optional<Domain::Polylines>(const SurfaceInfo& surface)>;
+using Strategy = std::function<std::optional<Plan>(const SurfaceInfo& surface)>;
 
 /**
  * @brief Runs @p strategy over @p surface, falling back to @p stock.
  *
- * Returns @p stock unchanged when no strategy is installed, when the strategy declines,
- * and whenever the answer is unusable: empty, or reaching outside SurfaceInfo::region.
+ * Returns @p stock at the stock flow when no strategy is installed, when the strategy
+ * declines, and whenever the answer is unusable: empty, or reaching outside
+ * SurfaceInfo::region.
  */
-Domain::Polylines plan_fill(
-    const Strategy& strategy, const SurfaceInfo& surface, Domain::Polylines stock
-);
+Plan plan_fill(const Strategy& strategy, const SurfaceInfo& surface, Domain::Polylines stock);
 
 } // namespace Slic3r::FillPlanner
