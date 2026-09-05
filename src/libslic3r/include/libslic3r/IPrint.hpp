@@ -13,6 +13,7 @@
 #include "libslic3r/Fill/FillPlanner.hpp"
 #include "libslic3r/GCode/IslandOrdering.hpp"
 #include "libslic3r/GCode/IslandSequencing.hpp"
+#include "libslic3r/GCode/ObjectLabels.hpp"
 #include "libslic3r/IThumbnailImageGenerator.hpp"
 #include "libslic3r/PrintSteps.hpp"
 #include "libslic3r/SlicingStatus.hpp"
@@ -107,6 +108,14 @@ public:
      * default, which preserves normal layer-by-layer G-code generation.
      */
     GCode::IslandSequencing::Strategy island_sequencing_strategy;
+
+    /**
+     * Names the parts of the print that are not model objects, so the printer can
+     * cancel them during a print the way it cancels an object. Asked once per part
+     * during G-code export. Empty by default, which names none of them and leaves the
+     * object list exactly as the stock slicer writes it. See GCode::ObjectLabels.
+     */
+    GCode::ObjectLabels::Strategy object_labels;
 };
 
 struct ValidationResult

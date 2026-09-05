@@ -366,6 +366,16 @@ std::string to_display_string(Biz::Slicing::Warning warning, const Domain::Proje
         );
         break;
 
+    case WarningCode::WipeTowerCancellable:
+        message = _u8L(
+            "A plugin has made the wipe tower cancellable from the printer. Cancelling it "
+            "mid print also cancels the purge that follows every tool change after that "
+            "point, so each new filament prints in the previous colour until the nozzle "
+            "clears itself - typically over a metre of extrusion on the object. Cancel "
+            "the wipe tower only once nothing left to print needs it."
+        );
+        break;
+
     case WarningCode::XYSizeCompensationIgnoredMultiMaterialPainting:
         message = _u8L(
             "An object has enabled XY Size compensation which will not be used "

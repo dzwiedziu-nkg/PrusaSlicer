@@ -143,6 +143,7 @@ enum class WarningCode
     ToolpathOutsideBuildVolume,
     GCodeConflict,
     IslandSequencingCollisionUnchecked,
+    WipeTowerCancellable,
     XYSizeCompensationIgnoredMultiMaterialPainting,
     XYSizeCompensationIgnoredFuzzySkinPainting
 };

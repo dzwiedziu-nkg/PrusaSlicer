@@ -15,6 +15,7 @@
 #include "boost/algorithm/string/replace.hpp"
 #include "Slic3r/Exception.hpp"
 #include "libslic3r/ExtrusionRole.hpp"
+#include "libslic3r/GCode/ObjectLabels.hpp"
 #include "libslic3r/GCode/Wipe.hpp"
 #include "libslic3r/GCode/WipeTower.hpp"
 #include "libslic3r/Geometry/ArcWelder.hpp"
@@ -119,8 +120,18 @@ std::string WipeTowerIntegration::append_tcr(
     assert(toolchange_gcode_str.empty() || toolchange_gcode_str.back() == '\n');
     assert(deretraction_str.empty() || deretraction_str.back() == '\n');
 
+    // A plugin may have made the tower cancellable. The tool change spliced into the
+    // middle of it must stay outside that: a firmware skipping the tower would skip the
+    // T command with it and print the rest of the layer in the wrong filament. Close the
+    // label around the tool change and open it again after.
+    const auto [suspend_label, resume_label] =
+        gcodegen.m_label_objects.suspend_region(GCode::ObjectLabels::RegionKind::WipeTower);
+    const std::string protected_toolchange{
+        toolchange_gcode_str.empty() ? toolchange_gcode_str
+                                     : suspend_label + toolchange_gcode_str + resume_label};
+
     // Insert the toolchange and deretraction gcode into the generated gcode.
-    boost::replace_first(tcr_rotated_gcode, "[toolchange_gcode_from_wipe_tower_generator]", toolchange_gcode_str);
+    boost::replace_first(tcr_rotated_gcode, "[toolchange_gcode_from_wipe_tower_generator]", protected_toolchange);
     boost::replace_first(tcr_rotated_gcode, "[deretraction_from_wipe_tower_generator]", deretraction_str);
     std::string tcr_gcode;
     Biz::Algorithms::unescape_string_cstyle(tcr_rotated_gcode, tcr_gcode);
@@ -128,7 +139,13 @@ std::string WipeTowerIntegration::append_tcr(
     const int acceleation_extruder{new_extruder_id > -1 ? new_extruder_id : tcr.initial_tool};
     if (config.get<std::vector<double>>("default_acceleration").at(acceleation_extruder) > 0)
         gcode += gcodegen.writer().set_print_acceleration(fast_round_up<unsigned int>(config.get<double>("wipe_tower_acceleration")));
+    // Only the tower's own moves belong to it. The travel that got here and the
+    // acceleration around it stay outside, so that skipping the tower cannot leave the
+    // printer at the tower's acceleration for the object that follows. Empty unless a
+    // plugin named the tower.
+    gcode += gcodegen.m_label_objects.start_region(GCode::ObjectLabels::RegionKind::WipeTower);
     gcode += tcr_gcode;
+    gcode += gcodegen.m_label_objects.stop_region();
     gcode += gcodegen.writer().set_print_acceleration(
         fast_round_up<unsigned int>(
             config.get<std::vector<double>>("default_acceleration").at(acceleation_extruder)
