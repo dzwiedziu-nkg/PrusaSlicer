@@ -1307,7 +1307,45 @@ Domain::ExtraPrintStatistics GCodeGenerator::_do_export(
     this->print_machine_envelope(file, print);
 
     // Label all objects so printer knows about them since the start.
-    m_label_objects.init(print.objects(), print.config().get<Domain::LabelObjectsStyle>("gcode_label_objects"), print.config().get<GCodeFlavor>("gcode_flavor"));
+    const auto label_objects_style = print.config().get<Domain::LabelObjectsStyle>("gcode_label_objects");
+    m_label_objects.init(print.objects(), label_objects_style, print.config().get<GCodeFlavor>("gcode_flavor"));
+    // A plugin may put parts of the print that are not model objects on that same list,
+    // so the printer can cancel them too. The wipe tower is the one the slicer knows of:
+    // cancel the last object that needed a second filament and the tower otherwise keeps
+    // being built, by itself, for whatever was left of the print. Not worth asking when
+    // there is no list to join: a plugin that answered would only be told to say nothing.
+    if (label_objects_style != Domain::LabelObjectsStyle::Disabled && has_wipe_tower
+        && print.wipe_tower()) {
+        const BoundingBoxf tower{
+            get_wipe_tower_extrusions_extents(print, std::numeric_limits<double>::max())};
+        if (tower.defined) {
+            const GCode::ObjectLabels::RegionInfo region{
+                GCode::ObjectLabels::RegionKind::WipeTower,
+                "Wipe tower",
+                Polygon{{scaled(tower.min),
+                         Point{scaled<coord_t>(tower.max.x()), scaled<coord_t>(tower.min.y())},
+                         scaled(tower.max),
+                         Point{scaled<coord_t>(tower.min.x()), scaled<coord_t>(tower.max.y())}}}
+            };
+            const std::optional<std::string> name{
+                GCode::ObjectLabels::name_for(print.object_labels, region)};
+            if (name.has_value()) {
+                m_label_objects.add_region(region.kind, *name, region.outline);
+            }
+            if (m_label_objects.has_region(region.kind)) {
+                // Cancelling the tower cancels the purge with it, and nothing on the
+                // printer says so at the moment the choice is made. Say it here, where
+                // there is still a chance to reconsider.
+                print.append_warning_callback(Biz::Slicing::Warning{
+                    Biz::Slicing::WarningCode::WipeTowerCancellable,
+                    {},
+                    std::nullopt,
+                    std::monostate{},
+                    Biz::Slicing::WarningSeverity::HIGH
+                });
+            }
+        }
+    }
     file.write(m_label_objects.all_objects_header());
 
     // Update output variables after the extruders were initialized.

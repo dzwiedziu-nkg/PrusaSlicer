@@ -209,6 +209,7 @@ set(SLIC3R_SOURCES
     src/libslic3r/GCode/LabelObjects.hpp
     src/libslic3r/GCode/ModelVisibility.cpp
     src/libslic3r/GCode/ModelVisibility.hpp
+    src/libslic3r/GCode/ObjectLabels.cpp
     src/libslic3r/GCode/PostProcessor.cpp
     src/libslic3r/GCode/PostProcessor.hpp
     src/libslic3r/GCode/PressureEqualizer.cpp
@@ -423,6 +424,7 @@ set(SLIC3R_PUBLIC_HEADERS
     include/libslic3r/GCode/ExtrusionFilter.hpp
     include/libslic3r/GCode/IslandOrdering.hpp
     include/libslic3r/GCode/IslandSequencing.hpp
+    include/libslic3r/GCode/ObjectLabels.hpp
     include/libslic3r/GeneratedSupportPoints.hpp
     include/libslic3r/IPrint.hpp
     include/libslic3r/InitPrint.hpp

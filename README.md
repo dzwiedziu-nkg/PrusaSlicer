@@ -1,6 +1,6 @@
 > ### This is a fork, not PrusaSlicer
 >
-> It adds **slicing plugin hooks**: four extension points that let a Lua plugin influence
+> It adds **slicing plugin hooks**: five extension points that let a Lua plugin influence
 > slicing itself, which the released plugin system cannot do.
 >
 > **`main` is the whole thing** — every hook, so every plugin below works. Build that one.
@@ -13,7 +13,8 @@
 > - Plugins built on it: [island order](https://github.com/dzwiedziu-nkg/island-order-plugin),
 >   [short extrusions](https://github.com/dzwiedziu-nkg/short-extrusion-plugin),
 >   [sequential islands](https://github.com/dzwiedziu-nkg/sequential-islands-plugin),
->   [radial bridges](https://github.com/dzwiedziu-nkg/radial-bridge-plugin)
+>   [radial bridges](https://github.com/dzwiedziu-nkg/radial-bridge-plugin),
+>   [cancellable wipe tower](https://github.com/dzwiedziu-nkg/wipe-tower-cancel-plugin)
 >
 > Prusa have said they intend to expose the slicing pipeline to plugins themselves. When
 > they do, these changes should go away and the plugins should target their interface.

@@ -26,7 +26,8 @@ const std::map<PluginApiType, std::string> PLUGIN_API_TYPE_NAMES = {
     {PluginApiType::SlicingIslandOrder, "slicing.island_order"},
     {PluginApiType::SlicingIslandSequence, "slicing.island_sequence"},
     {PluginApiType::SlicingExtrusionFilter, "slicing.extrusion_filter"},
-    {PluginApiType::SlicingFillPlanner, "slicing.fill_planner"}
+    {PluginApiType::SlicingFillPlanner, "slicing.fill_planner"},
+    {PluginApiType::SlicingObjectLabels, "slicing.object_labels"}
 };
 }
 

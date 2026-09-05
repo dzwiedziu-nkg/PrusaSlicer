@@ -11,6 +11,7 @@
 #include "Slic3r/App/Lua/FillPlannerPlugin.hpp"
 #include "Slic3r/App/Lua/IslandOrderPlugin.hpp"
 #include "Slic3r/App/Lua/IslandSequencePlugin.hpp"
+#include "Slic3r/App/Lua/ObjectLabelsPlugin.hpp"
 #include "Slic3r/Directories.hpp"
 #include "Slic3r/Utils.hpp"
 #include "Slic3r/Version.hpp"
@@ -263,6 +264,11 @@ void BackgroundProcess::slice(
                     {resources_dir() + "/lua", data_dir() + "/lua"}
                 );
                 print->island_sequencing_strategy = App::Lua::make_island_sequence_strategy(
+                    {resources_dir() + "/lua", data_dir() + "/lua"}
+                );
+                // And a plugin may name the parts of the print that are not model
+                // objects, so the printer can cancel them during a print as well.
+                print->object_labels = App::Lua::make_object_labels(
                     {resources_dir() + "/lua", data_dir() + "/lua"}
                 );
 

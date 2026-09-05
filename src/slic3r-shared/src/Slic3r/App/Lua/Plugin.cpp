@@ -19,7 +19,8 @@ const std::unordered_map<PluginType, std::string> PLUGIN_TYPE_NAMES = {
     {PluginType::SlicingIslandOrder, "slicing.island_order"},
     {PluginType::SlicingIslandSequence, "slicing.island_sequence"},
     {PluginType::SlicingExtrusionFilter, "slicing.extrusion_filter"},
-    {PluginType::SlicingFillPlanner, "slicing.fill_planner"}
+    {PluginType::SlicingFillPlanner, "slicing.fill_planner"},
+    {PluginType::SlicingObjectLabels, "slicing.object_labels"}
 };
 
 // The global each plugin type has to define to be usable.
@@ -28,7 +29,8 @@ const std::unordered_map<PluginType, std::string> PLUGIN_ENTRY_POINTS = {
     {PluginType::SlicingIslandOrder, "order_islands"},
     {PluginType::SlicingIslandSequence, "plan_islands"},
     {PluginType::SlicingExtrusionFilter, "keep_extrusion"},
-    {PluginType::SlicingFillPlanner, "plan_fill"}
+    {PluginType::SlicingFillPlanner, "plan_fill"},
+    {PluginType::SlicingObjectLabels, "label_region"}
 };
 }
 

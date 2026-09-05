@@ -80,8 +80,8 @@ This is list of recognized `manifest.json` fields.
 The table `info` describes plugin with following keys:
 - `id` (string) plugin unique identifier, recommended is reverse domain name like notation
 - `type` (string) type of plugin, allowed values are `'project.plugin'`,
-  `'slicing.island_order'`, `'slicing.island_sequence'`, `'slicing.extrusion_filter'`
-  and `'slicing.fill_planner'`.
+  `'slicing.island_order'`, `'slicing.island_sequence'`, `'slicing.extrusion_filter'`,
+  `'slicing.fill_planner'` and `'slicing.object_labels'`.
 - `title` (string) displayed plugin name
 - `menu` (string) menu item path to register the plugin under _Plugins_ menu item (e.g. `Calibration/My cool pattern`).
   Only used by `project.plugin`.
@@ -378,6 +378,67 @@ serialized G-code stage, `plan_fill()` is reached from the slicer's parallel inf
 once per surface across all layers at once. Calls are serialized on the way into Lua, so a
 plugin does not have to be thread safe, but a plugin that answers for every surface of a
 large print will hold that stage up. Claim only the surfaces you can improve.
+
+### `slicing.object_labels`
+
+Names the parts of a print that are not model objects, so the printer can cancel them
+during a print the way it cancels an object.
+
+Firmware that can cancel an object mid print - `M486` on Marlin and Prusa Buddy,
+`EXCLUDE_OBJECT` on Klipper, `; printing object` comments for OctoPrint - works from a
+list the slicer writes into the G-code, and that list holds model objects only. Whatever
+else the printer lays down belongs to no object and cannot be cancelled. The wipe tower is
+the case that motivated this: cancel the last object that needed a second filament and the
+tower carries on being built, by itself, for however long the print had left.
+
+The plugin has to define `label_region(region)`:
+
+```lua
+info = {
+    id = "wipe_tower_cancel",
+    type = "slicing.object_labels",
+    title = "Cancellable wipe tower"
+}
+
+function label_region(region)
+    -- region = {
+    --     kind         = <string>,   -- "wipe_tower" is the only kind so far
+    --     default_name = <string>,   -- what the slicer calls it
+    --     outline      = {{x = <mm>, y = <mm>}, ...}   -- its footprint on the bed
+    -- }
+    -- return the name to list it under, or nil to leave it unlabelled
+end
+```
+
+`label_region()` is called once per region per export, before any layer is generated.
+Return `nil` to leave that part of the print as the stock slicer writes it; that is also
+what happens when the plugin raises, answers with something that is not a string, or
+answers with a name that is nothing but spaces.
+
+The engine owns the syntax. A named region is defined in the same header, in the same
+dialect and with an identifier that runs on from the objects', and its label is opened and
+closed around its extrusions - so the objects keep the numbers they would have had, and a
+plugin does not have to know one firmware's dialect from another's. What the plugin
+chooses is which parts get a label and what it says. The name reaches the printer, and
+Klipper's restrictions on it are applied by the engine.
+
+Around the wipe tower the boundaries are drawn deliberately: the travel to the tower, the
+acceleration around it and, above all, the tool change spliced into the middle of it stay
+**outside** the label. A firmware skipping a cancelled tower therefore never skips a `T`
+command, and never leaves the printer at the tower's acceleration for the object that
+follows.
+
+What a cancelled tower does skip is the ramming and the purge, and that is not a detail:
+the purge is where the previous filament leaves the nozzle, so a tower cancelled with tool
+changes still to come pushes the old colour out **on the object instead**, over a long
+stretch of extrusion. Naming the wipe tower therefore raises a `WipeTowerCancellable`
+slicing warning on every export, because the choice is made on the printer hours later,
+where there is nothing left to warn anyone.
+
+This hook does nothing unless object labelling is switched on: Print Settings >
+**Precision & Slicing** > *Resolution & G-code Data* > Label objects
+(`gcode_label_objects`), which is where the object list itself comes from. It is where the
+option lives in 3.x; in 2.x it was under Output options.
 
 ## Plugin API
 
