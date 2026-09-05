@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <map>
+#include <utility>
 #include <cassert>
 
 #include "Slic3r/Biz/Algorithms/DouglasPeucker.hpp"
@@ -49,6 +50,32 @@ Polygon instance_outline(const PrintInstance* pi)
         return outline.front().contour;
     else
         return Algorithms::ModelObject::convex_hull_2d(*pi->model_instance.get_object(), pi->model_instance.get_matrix());
+}
+
+/** @brief The center and polygon strings the label list carries for one footprint. */
+std::pair<std::string, std::string> outline_strings(Polygon outline)
+{
+    ASSERT(! outline.empty());
+    Algorithms::DouglasPeucker::douglas_peucker(outline, 50000.f);
+    const Point center = outline.centroid();
+    char buffer[64];
+    std::snprintf(buffer, sizeof(buffer) - 1, "%.3f,%.3f", unscale<float>(center[0]), unscale<float>(center[1]));
+    std::string center_str(buffer);
+    std::string polygon_str = std::string("[");
+    for (const Point& point : outline) {
+        std::snprintf(buffer, sizeof(buffer) - 1, "[%.3f,%.3f],", unscale<float>(point[0]), unscale<float>(point[1]));
+        polygon_str += buffer;
+    }
+    polygon_str.pop_back();
+    polygon_str += "]";
+    return {center_str, polygon_str};
+}
+
+/** @brief Replaces the characters Klipper will not accept in an object name. */
+void sanitize_for_klipper(std::string& name)
+{
+    const std::string banned = "\b\t\n\v\f\r \"#%&\'*-./:;<>\\";
+    std::replace_if(name.begin(), name.end(), [&banned](char c) { return banned.find(c) != std::string::npos; }, '_');
 }
 
 }; // anonymous namespace
@@ -116,28 +143,14 @@ void LabelObjects::init(const SpanOfConstPtrs<PrintObject>& objects, Domain::Lab
                     name += " (Instance " + std::to_string(instance_id) + ")";
                 if (m_flavor == gcfKlipper) {
                     // Disallow Klipper special chars, common illegal filename chars, etc.
-                    const std::string banned = "\b\t\n\v\f\r \"#%&\'*-./:;<>\\";
-                    std::replace_if(name.begin(), name.end(), [&banned](char c) { return banned.find(c) != std::string::npos; }, '_');
+                    sanitize_for_klipper(name);
                 }
             }
 
             // Now calculate the polygon and center for Cancel Object (this is not always used).
-            Polygon outline = instance_outline(pi);
-            assert(! outline.empty());
-            Algorithms::DouglasPeucker::douglas_peucker(outline, 50000.f);
-            Point center = outline.centroid();
-            char buffer[64];
-            std::snprintf(buffer, sizeof(buffer) - 1, "%.3f,%.3f", unscale<float>(center[0]), unscale<float>(center[1]));
-            std::string center_str(buffer);
-            std::string polygon_str = std::string("[");
-            for (const Point& point : outline) {
-                std::snprintf(buffer, sizeof(buffer) - 1, "[%.3f,%.3f],", unscale<float>(point[0]), unscale<float>(point[1]));
-                polygon_str += buffer;
-            }
-            polygon_str.pop_back();
-            polygon_str += "]";
+            const auto [center_str, polygon_str] = outline_strings(instance_outline(pi));
 
-            m_label_data.emplace_back(LabelData{pi, name, center_str, polygon_str, unique_id});
+            m_label_data.emplace_back(LabelData{pi, std::nullopt, name, center_str, polygon_str, unique_id});
             ++unique_id;
         }
     }
@@ -151,11 +164,33 @@ bool LabelObjects::update(const PrintInstance *instance) {
     return true;
 }
 
-std::string LabelObjects::maybe_start_instance(GCodeWriter& writer) {
-    if (current_instance == nullptr && last_operation_instance != nullptr) {
-        current_instance = last_operation_instance;
+const LabelObjects::LabelData* LabelObjects::find(const PrintInstance& print_instance) const
+{
+    const auto it = std::find_if(m_label_data.begin(), m_label_data.end(),
+        [&print_instance](const LabelData& ld) { return ld.pi == &print_instance; });
+    return it == m_label_data.end() ? nullptr : &*it;
+}
 
-        std::string result{this->start_object(*current_instance, LabelObjects::IncludeName::No)};
+const LabelObjects::LabelData* LabelObjects::find(const ObjectLabels::RegionKind kind) const
+{
+    const auto it = std::find_if(m_label_data.begin(), m_label_data.end(),
+        [kind](const LabelData& ld) { return ld.kind == kind; });
+    return it == m_label_data.end() ? nullptr : &*it;
+}
+
+const PrintInstance* LabelObjects::current_instance() const
+{
+    return current_label == nullptr ? nullptr : current_label->pi;
+}
+
+std::string LabelObjects::maybe_start_instance(GCodeWriter& writer) {
+    if (this->current_instance() == nullptr && last_operation_instance != nullptr) {
+        current_label = this->find(*last_operation_instance);
+        if (current_label == nullptr) {
+            return "";
+        }
+
+        std::string result{this->start_object(*current_label, LabelObjects::IncludeName::No)};
         result += writer.reset_e(true);
         return result;
     }
@@ -163,16 +198,16 @@ std::string LabelObjects::maybe_start_instance(GCodeWriter& writer) {
 }
 
 std::string LabelObjects::maybe_stop_instance() {
-    if (current_instance != nullptr) {
-        const std::string result{this->stop_object(*current_instance)};
-        current_instance = nullptr;
+    if (current_label != nullptr) {
+        const std::string result{this->stop_object(*current_label)};
+        current_label = nullptr;
         return result;
     }
     return "";
 }
 
 std::string LabelObjects::maybe_change_instance(GCodeWriter& writer) {
-    if (last_operation_instance != current_instance) {
+    if (last_operation_instance != this->current_instance()) {
         const std::string stop_instance_gcode{this->maybe_stop_instance()};
         // Be carefull with refactoring: this->maybe_stop_instance() + this->maybe_start_instance()
         // may not be evaluated in order. The order is indeed undefined!
@@ -182,7 +217,73 @@ std::string LabelObjects::maybe_change_instance(GCodeWriter& writer) {
 }
 
 bool LabelObjects::has_active_instance() {
-    return this->current_instance != nullptr;
+    return this->current_instance() != nullptr;
+}
+
+void LabelObjects::add_region(
+    const ObjectLabels::RegionKind kind, const std::string& name, const Domain::Polygon& outline
+)
+{
+    if (m_label_objects_style == Domain::LabelObjectsStyle::Disabled || outline.empty()) {
+        return;
+    }
+    ASSERT(this->find(kind) == nullptr);
+    // The open label is a pointer into m_label_data, which the emplace_back below may
+    // move. Adding a region once the G-code is running would dangle it; the contract is
+    // that this happens between init() and all_objects_header().
+    ASSERT(current_label == nullptr);
+
+    std::string label_name{name};
+    if (m_label_objects_style == Domain::LabelObjectsStyle::Firmware && m_flavor == gcfKlipper) {
+        sanitize_for_klipper(label_name);
+    }
+    const auto [center_str, polygon_str] = outline_strings(outline);
+
+    // The identifiers run on from the objects', so the region takes the next one and the
+    // objects keep the numbers they would have had without it.
+    m_label_data.emplace_back(
+        LabelData{nullptr, kind, label_name, center_str, polygon_str, int(m_label_data.size())}
+    );
+}
+
+bool LabelObjects::has_region(const ObjectLabels::RegionKind kind) const
+{
+    return this->find(kind) != nullptr;
+}
+
+std::string LabelObjects::start_region(const ObjectLabels::RegionKind kind)
+{
+    const LabelData* label = this->find(kind);
+    if (label == nullptr) {
+        return "";
+    }
+
+    // Whatever object was open has to be closed first: the firmware tracks one at a time.
+    std::string result{this->maybe_stop_instance()};
+    result += this->start_object(*label, IncludeName::No);
+    current_label = label;
+    return result;
+}
+
+std::string LabelObjects::stop_region()
+{
+    if (current_label == nullptr || !current_label->kind.has_value()) {
+        return "";
+    }
+    const std::string result{this->stop_object(*current_label)};
+    current_label = nullptr;
+    return result;
+}
+
+std::pair<std::string, std::string> LabelObjects::suspend_region(
+    const ObjectLabels::RegionKind kind
+) const
+{
+    const LabelData* label = this->find(kind);
+    if (label == nullptr) {
+        return {};
+    }
+    return {this->stop_object(*label), this->start_object(*label, IncludeName::No)};
 }
 
 std::string LabelObjects::all_objects_header() const
@@ -197,8 +298,8 @@ std::string LabelObjects::all_objects_header() const
         if (m_label_objects_style == Domain::LabelObjectsStyle::Firmware && m_flavor == gcfKlipper)
             out += "EXCLUDE_OBJECT_DEFINE NAME='" + label.name + "' CENTER=" + label.center + " POLYGON=" + label.polygon + "\n";
         else {
-            out += start_object(*label.pi, IncludeName::Yes);
-            out += stop_object(*label.pi);
+            out += start_object(label, IncludeName::Yes);
+            out += stop_object(label);
         }
     }
     out += "\n";
@@ -222,12 +323,10 @@ std::string LabelObjects::all_objects_header_singleline_json() const
 
 
 
-std::string LabelObjects::start_object(const PrintInstance& print_instance, IncludeName include_name) const
+std::string LabelObjects::start_object(const LabelData& label, IncludeName include_name) const
 {
     if (m_label_objects_style == Domain::LabelObjectsStyle::Disabled)
         return std::string();
-
-    const LabelData& label = *std::find_if(m_label_data.begin(), m_label_data.end(), [&print_instance](const LabelData& ld) { return ld.pi == &print_instance; });
 
     std::string out;
     if (m_label_objects_style == Domain::LabelObjectsStyle::Octoprint)
@@ -255,12 +354,10 @@ std::string LabelObjects::start_object(const PrintInstance& print_instance, Incl
 
 
 
-std::string LabelObjects::stop_object(const PrintInstance& print_instance) const
+std::string LabelObjects::stop_object(const LabelData& label) const
 {
     if (m_label_objects_style == Domain::LabelObjectsStyle::Disabled)
         return std::string();
-
-    const LabelData& label = *std::find_if(m_label_data.begin(), m_label_data.end(), [&print_instance](const LabelData& ld) { return ld.pi == &print_instance; });
 
     std::string out;
     if (m_label_objects_style == Domain::LabelObjectsStyle::Octoprint)

@@ -1,6 +1,6 @@
 # Building and running this fork
 
-This is a fork of PrusaSlicer `3.0.0-alpha11` that adds **slicing plugin hooks** — four
+This is a fork of PrusaSlicer `3.0.0-alpha11` that adds **slicing plugin hooks** — five
 extension points that let a Lua plugin influence slicing itself, which the released
 plugin system cannot do.
 
@@ -12,6 +12,7 @@ API and the plugins that use it:
 - [short-extrusion-plugin](https://github.com/dzwiedziu-nkg/short-extrusion-plugin) — drops extrusions not worth the travel to reach them
 - [sequential-islands-plugin](https://github.com/dzwiedziu-nkg/sequential-islands-plugin) — prints an object's upper branches one at a time
 - [radial-bridge-plugin](https://github.com/dzwiedziu-nkg/radial-bridge-plugin) — runs bridges over annular gaps as spokes
+- [wipe-tower-cancel-plugin](https://github.com/dzwiedziu-nkg/wipe-tower-cancel-plugin) — lets the printer cancel the wipe tower mid print
 
 `doc/Build.md` is upstream's build guide and still applies. This file adds the parts that
 are specific to this fork, and the one thing upstream leaves out: **where the built
@@ -146,6 +147,13 @@ ln -s ~/projects/island-order-plugin/com.github.dzwiedziu-nkg.island-order \
 Editing a plugin's `.lua` or its `settings.lua` takes effect **on the next slice** — no
 restart, no rescan. To disable one, remove the symlink.
 
+`settings.lua` is the only way to configure a slicing plugin: **there is no UI for it.**
+The _Plugins_ menu and its parameter dialog list plugins of type `project.plugin` only
+(`PluginSystem.cpp` refuses anything else), and a slicing plugin is never invoked by the
+user, so it does not appear there. Each plugin's README documents its keys. Note that the
+file is loaded inside a `pcall`, so a syntax error in it is silent: the file is ignored and
+the plugin's built-in defaults apply.
+
 Slicing plugins have no menu entry; they are not user invoked. The log names each one at
 the start of every slice:
 
@@ -153,6 +161,7 @@ the start of every slice:
 [info] Island ordering plugin in use: com.github.dzwiedziu-nkg.island-order.island_order
 [info] Extrusion filter plugin in use: com.github.dzwiedziu-nkg.short-extrusion.short_extrusion
 [info] Fill planner plugin in use: com.github.dzwiedziu-nkg.radial-bridge.radial_bridge
+[info] Object labels plugin in use: com.github.dzwiedziu-nkg.wipe-tower-cancel.wipe_tower_cancel
 ```
 
 The same lines go to `~/.config/PrusaSlicer3-dev/shared_runtime/log.txt`. Note that the log
