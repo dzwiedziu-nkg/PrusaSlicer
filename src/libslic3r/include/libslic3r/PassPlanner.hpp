@@ -68,6 +68,15 @@ struct SurfaceInfo
     double layer_height;
     double nozzle_diameter;
     /**
+     * @brief Speed the extra pass will be printed at, in mm/s.
+     *
+     * Needed because what a pass costs the extruder is a rate, not a quantity: the flow it
+     * runs at is Plan::flow_ratio x layer_height x Plan::spacing x this. A pass at a few
+     * hundredths of a mm3/s held for minutes is how an ironing pass clogs a nozzle, and
+     * this is the term a strategy cannot work out for itself.
+     */
+    double pass_speed;
+    /**
      * @brief Whether another part of the print will be laid directly onto this area.
      *
      * True for the top of a support interface, which the object is printed against, and

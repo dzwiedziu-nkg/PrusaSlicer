@@ -50,7 +50,7 @@ ExPolygon square()
 
 SurfaceInfo surface(const ExPolygon& region, const GCodeExtrusionRole role, const bool object_above = true)
 {
-    return SurfaceInfo{role, region, 7, 1.4, 0, 0.45, 0.5, 1.5708, 0.2, 0.4, object_above};
+    return SurfaceInfo{role, region, 7, 1.4, 0, 0.45, 0.5, 1.5708, 0.2, 0.4, 30., object_above};
 }
 
 /** @brief A single path from (x0, y0) to (x1, y1), in millimetres. */
@@ -162,7 +162,7 @@ TEST_CASE_METHOD(PluginFixture, "[PassPlannerPlugin] the surface reaches the plu
             if surface.layer_id ~= 7 or surface.print_z ~= 1.4 then return nil end
             if surface.extruder_id ~= 0 or surface.spacing ~= 0.45 then return nil end
             if surface.extrusion_width ~= 0.5 or surface.layer_height ~= 0.2 then return nil end
-            if surface.nozzle_diameter ~= 0.4 then return nil end
+            if surface.nozzle_diameter ~= 0.4 or surface.pass_speed ~= 30.0 then return nil end
             if not surface.object_above then return nil end
             if #surface.contour ~= 4 or #surface.holes ~= 0 then return nil end
             -- the square spans 0..10 mm in both axes

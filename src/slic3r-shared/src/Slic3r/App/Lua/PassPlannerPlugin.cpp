@@ -152,6 +152,7 @@ public:
         argument["angle"] = surface.angle;
         argument["layer_height"] = surface.layer_height;
         argument["nozzle_diameter"] = surface.nozzle_diameter;
+        argument["pass_speed"] = surface.pass_speed;
         argument["object_above"] = surface.object_above;
         argument["contour"] = contour_to_lua(lua, surface.region.contour);
 
