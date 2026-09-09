@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "libslic3r/Layer.hpp"
+#include "libslic3r/PassPlanner.hpp"
 #include "libslic3r/Polygon.hpp"
 #include "libslic3r/Print.hpp"
 #include "libslic3r/Support/SupportLayer.hpp"
@@ -71,6 +72,9 @@ SupportGeneratorLayersPtr generate_support_layers(
 
 // Produce the support G-code.
 // Used by both classic and tree supports.
+// pass_planner, when installed, is offered every interface surface after it has been
+// filled and may answer with an extra pass to run over it - ironing the top of the
+// interface flat, so the object cast against it comes out flat as well.
 void generate_support_toolpaths(
 	SupportLayerPtrs    				&support_layers,
 	const PrintObjectConfigView 			&config,
@@ -81,7 +85,8 @@ void generate_support_toolpaths(
     const SupportGeneratorLayersPtr   	&top_contacts,
     const SupportGeneratorLayersPtr   	&intermediate_layers,
 	const SupportGeneratorLayersPtr   	&interface_layers,
-    const SupportGeneratorLayersPtr   	&base_interface_layers);
+    const SupportGeneratorLayersPtr   	&base_interface_layers,
+    const PassPlanner::Strategy         &pass_planner);
 
 // FN_HIGHER_EQUAL: the provided object pointer has a Z value >= of an internal threshold.
 // Find the first item with Z value >= of an internal threshold of fn_higher_equal.

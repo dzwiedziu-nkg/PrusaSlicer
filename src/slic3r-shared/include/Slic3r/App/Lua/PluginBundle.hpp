@@ -28,6 +28,7 @@ enum class PluginApiType
     SlicingIslandSequence,
     SlicingExtrusionFilter,
     SlicingFillPlanner,
+    SlicingPassPlanner,
     SlicingObjectLabels
 };
 
