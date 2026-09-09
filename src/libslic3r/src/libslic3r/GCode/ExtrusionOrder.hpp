@@ -106,6 +106,9 @@ struct SliceExtrusions {
 struct SupportPath {
     SmoothPath path;
     bool is_interface;
+    // An extra pass a plugin asked for over the surface below it, which is printed at the
+    // ironing speed rather than at either of the support speeds.
+    bool is_ironing;
 };
 
 struct NormalExtrusions {

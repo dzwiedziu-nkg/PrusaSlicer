@@ -424,27 +424,34 @@ std::vector<SupportPath> get_support_extrusions(
                                               ExtrusionRole::SupportMaterialInterface;
                 entities_cache.reserve(support_layer.support_fills.entities.size());
                 for (ExtrusionEntity *ee : support_layer.support_fills.entities)
-                    if (ee->role() == role)
+                    // A mixed collection is an interface fill with an extra pass over it,
+                    // which belongs to whichever extruder prints the interface.
+                    if (ee->role() == role
+                        || (ee->role().is_mixed() && role == ExtrusionRole::SupportMaterialInterface))
                         entities_cache.emplace_back(ee);
             }
             std::vector<SupportPath> paths;
             for (const ExtrusionEntityReference &entity_reference : chain_extrusion_references(entities)) {
                 auto collection{dynamic_cast<const ExtrusionEntityCollection *>(&entity_reference.extrusion_entity())};
-                const bool is_interface{entity_reference.extrusion_entity().role() != ExtrusionRole::SupportMaterial};
                 if (collection != nullptr) {
                     for (const ExtrusionEntity * sub_entity : *collection) {
+                        // Read the role off the path rather than off the collection: a
+                        // collection holding an interface fill and an extra pass over it
+                        // has no single role, and the two are printed differently.
+                        const ExtrusionRole role{sub_entity->role()};
                         std::optional<InstancePoint> last_position{get_instance_point(previous_position, {0, 0})};
                         auto [path, _]{smooth_path(nullptr, nullptr, {*sub_entity, entity_reference.flipped()}, extruder_id, last_position)};
                         if (!path.empty()) {
-                            paths.push_back({std::move(path), is_interface});
+                            paths.push_back({std::move(path), role != ExtrusionRole::SupportMaterial, role == ExtrusionRole::Ironing});
                         }
                         previous_position = get_gcode_point(last_position, {0, 0});
                     }
                 } else {
+                    const ExtrusionRole role{entity_reference.extrusion_entity().role()};
                     std::optional<InstancePoint> last_position{get_instance_point(previous_position, {0, 0})};
                     auto [path, _]{smooth_path(nullptr, nullptr, entity_reference, extruder_id, last_position)};
                     if (!path.empty()) {
-                        paths.push_back({std::move(path), is_interface});
+                        paths.push_back({std::move(path), role != ExtrusionRole::SupportMaterial, role == ExtrusionRole::Ironing});
                     }
                     previous_position = get_gcode_point(last_position, {0, 0});
                 }

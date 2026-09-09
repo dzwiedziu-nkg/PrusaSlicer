@@ -293,6 +293,7 @@ set(SLIC3R_SOURCES
     src/libslic3r/MutablePriorityQueue.hpp
     src/libslic3r/NormalUtils.cpp
     src/libslic3r/NormalUtils.hpp
+    src/libslic3r/PassPlanner.cpp
     src/libslic3r/PerimeterGenerator.cpp
     src/libslic3r/PerimeterGenerator.hpp
     src/libslic3r/Point.cpp
@@ -428,6 +429,7 @@ set(SLIC3R_PUBLIC_HEADERS
     include/libslic3r/GeneratedSupportPoints.hpp
     include/libslic3r/IPrint.hpp
     include/libslic3r/InitPrint.hpp
+    include/libslic3r/PassPlanner.hpp
     include/libslic3r/PrintSteps.hpp
     include/libslic3r/SerializedConfig.hpp
     include/libslic3r/SLAResult.hpp
