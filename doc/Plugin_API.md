@@ -410,6 +410,7 @@ function plan_pass(surface)
     --     angle           = <radians>,  -- the direction they run in
     --     layer_height    = <mm>,
     --     nozzle_diameter = <mm>,
+    --     pass_speed      = <mm/s>,     -- how fast the pass itself will be printed
     --     object_above    = <boolean>,  -- something will be printed directly onto this
     --     contour         = {{x = <mm>, y = <mm>}, ...},              -- outer boundary
     --     holes           = {{{x = <mm>, y = <mm>}, ...}, ...}        -- inner boundaries
@@ -445,6 +446,20 @@ of a full layer of material to put down, so `1.0` deposits as much as a normal e
 `spacing` would, which over material that is already there doubles it. Values outside 0.0
 to 1.0 are clamped, `0.0` is a pass that only reheats, and a `spacing` or `flow_ratio` that
 is not a number is refused along with the rest of the answer.
+
+`pass_speed` is there because what a pass costs the extruder is a rate, not a quantity. The
+flow it runs at is
+
+```
+mm3/s = flow_ratio x surface.layer_height x spacing x surface.pass_speed
+```
+
+and at the slicer's own ironing defaults that comes to around 0.07 mm3/s - a hundredth of
+ordinary printing - held for as long as the pass lasts. A pass that holds a flow that low for
+minutes is how an ironing pass clogs a nozzle, so a strategy that lets its spacing or its flow
+ratio be configured should check the product rather than the parts. The pass is also left with
+a retraction for the same reason: after it, the melt is de-pressurised and the next extrusion
+would otherwise start starved.
 
 `object_above` is what separates a mould from a finish. It is true for the top of a support
 interface, which the object is printed against, and false for a surface with only more

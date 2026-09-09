@@ -3512,7 +3512,8 @@ std::string GCodeGenerator::extrude_support(
     if (! support_extrusions.empty()) {
         const double  support_speed            = config.support_material_speed;
         const double  support_interface_speed  = config.support_material_interface_speed.get_abs_value(support_speed);
-        for (const GCode::ExtrusionOrder::SupportPath &path : support_extrusions) {
+        for (std::size_t i = 0; i < support_extrusions.size(); ++i) {
+            const GCode::ExtrusionOrder::SupportPath &path = support_extrusions[i];
             const auto   label = path.is_ironing ? support_ironing_label :
                                  path.is_interface ? support_interface_label : support_label;
             // -1 hands the speed back to the role, which is what gives an extra pass over
@@ -3520,6 +3521,16 @@ std::string GCodeGenerator::extrude_support(
             const double speed = path.is_ironing ? -1. :
                                  path.is_interface ? support_interface_speed : support_speed;
             gcode += this->extrude_smooth_path(path.path, false, label, speed, config);
+            // Leaving an extra pass. Minutes at a hundredth of the usual flow leave the
+            // melt de-pressurised, and whatever comes next is an ordinary extrusion at a
+            // hundred times the rate; the hop away is normally far too short to earn a
+            // retraction of its own, so the first millimetres of that extrusion come out
+            // starved. Retract on the way out so the pressure is rebuilt from a known
+            // state. Only reachable when a pass planner put ironing into a support layer.
+            if (path.is_ironing
+                && (i + 1 == support_extrusions.size() || !support_extrusions[i + 1].is_ironing)) {
+                gcode += this->retract_and_wipe(config.retract_speed, config.travel_speed);
+            }
         }
     }
     return gcode;

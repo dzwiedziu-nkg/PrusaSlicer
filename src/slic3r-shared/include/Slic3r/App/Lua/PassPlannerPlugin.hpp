@@ -10,7 +10,7 @@ namespace Slic3r::App::Lua {
 /**
  * @brief Version of the `slicing.pass_planner` plugin API implemented here.
  */
-constexpr auto PASS_PLANNER_API_VERSION = "1.0.0";
+constexpr auto PASS_PLANNER_API_VERSION = "1.1.0";
 
 /**
  * @brief Builds a pass planner from the installed slicing plugin.

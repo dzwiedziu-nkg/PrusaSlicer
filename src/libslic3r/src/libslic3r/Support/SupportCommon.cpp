@@ -1570,6 +1570,9 @@ static ExtrusionEntitiesPtr generate_extra_pass(
     double                       angle,
     size_t                       layer_id,
     double                       print_z,
+    // Speed the pass will be printed at, so a strategy can work out the flow it is asking
+    // the extruder to hold.
+    double                       pass_speed,
     ExtrusionRole                role,
     // Whether the object will be printed directly onto this surface, which is what makes
     // ironing it worth the time.
@@ -1597,6 +1600,7 @@ static ExtrusionEntitiesPtr generate_extra_pass(
                 angle,
                 flow.height(),
                 flow.nozzle_diameter(),
+                pass_speed,
                 object_above
             };
             std::optional<PassPlanner::Plan> plan = PassPlanner::plan_pass(pass_planner, surface);
@@ -1951,7 +1955,8 @@ void generate_support_toolpaths(
                     // is printed onto it. Planned before the fill, which consumes the areas.
                     ExtrusionEntitiesPtr extra_pass = generate_extra_pass(
                         pass_planner, areas, interface_flow, density, filler->angle,
-                        support_layer_id, support_layer.print_z, role,
+                        support_layer_id, support_layer.print_z,
+                        config.get<double>("ironing_speed"), role,
                         // The object is cast against the top contact layer; every other
                         // support surface has only more support printed onto it.
                         &layer_ex == &top_contact_layer);
