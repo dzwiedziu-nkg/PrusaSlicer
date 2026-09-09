@@ -55,8 +55,8 @@ Here is an example of bundled plugin manifest:
 ```
 
 The recognized `required_apis` keys are `project.plugin`, `slicing.island_order`,
-`slicing.island_sequence`, `slicing.extrusion_filter` and `slicing.fill_planner`,
-all at version `1.0.0`.
+`slicing.island_sequence`, `slicing.extrusion_filter`, `slicing.fill_planner` and
+`slicing.pass_planner`, all at version `1.0.0`.
 
 This is list of recognized `manifest.json` fields. 
 
@@ -81,7 +81,7 @@ The table `info` describes plugin with following keys:
 - `id` (string) plugin unique identifier, recommended is reverse domain name like notation
 - `type` (string) type of plugin, allowed values are `'project.plugin'`,
   `'slicing.island_order'`, `'slicing.island_sequence'`, `'slicing.extrusion_filter'`,
-  `'slicing.fill_planner'` and `'slicing.object_labels'`.
+  `'slicing.fill_planner'`, `'slicing.pass_planner'` and `'slicing.object_labels'`.
 - `title` (string) displayed plugin name
 - `menu` (string) menu item path to register the plugin under _Plugins_ menu item (e.g. `Calibration/My cool pattern`).
   Only used by `project.plugin`.
@@ -378,6 +378,89 @@ serialized G-code stage, `plan_fill()` is reached from the slicer's parallel inf
 once per surface across all layers at once. Calls are serialized on the way into Lua, so a
 plugin does not have to be thread safe, but a plugin that answers for every surface of a
 large print will hold that stage up. Claim only the surfaces you can improve.
+
+### `slicing.pass_planner`
+
+Runs an extra pass over an area the slicer has just covered, at the same height, once the
+covering extrusions are down.
+
+Some surfaces are worth going over a second time with the nozzle barely extruding, to melt
+the ridges between the extrusions flat. The slicer already does this for the top of an
+object, where it is called ironing. The case that motivated the hook is the other one: the
+top of a support interface, which is the mould the underside of the overhang above it is
+cast in, so every ridge in it is copied into the finished part.
+
+The plugin has to define `plan_pass(surface)`:
+
+```lua
+info = {
+    id = "support_ironing",
+    type = "slicing.pass_planner",
+    title = "Support interface ironing"
+}
+
+function plan_pass(surface)
+    -- surface = {
+    --     role            = <string>,   -- as for slicing.extrusion_filter: what covered it
+    --     layer_id        = <integer>,
+    --     print_z         = <mm>,
+    --     extruder_id     = <integer>,
+    --     spacing         = <mm>,       -- between two adjacent covering extrusions
+    --     extrusion_width = <mm>,       -- width of the covering extrusions
+    --     angle           = <radians>,  -- the direction they run in
+    --     layer_height    = <mm>,
+    --     nozzle_diameter = <mm>,
+    --     object_above    = <boolean>,  -- something will be printed directly onto this
+    --     contour         = {{x = <mm>, y = <mm>}, ...},              -- outer boundary
+    --     holes           = {{{x = <mm>, y = <mm>}, ...}, ...}        -- inner boundaries
+    -- }
+    -- return a list of paths, {{{x, y}, ...}, ...}, or nil
+end
+```
+
+Return `nil` to run no extra pass over this area, which is also what happens when the
+plugin raises or answers with something that is not a list of paths, so a broken plugin can
+never fail a slice. Paths are clipped to the area, and a plugin whose paths clip away to
+nothing gets no pass rather than an empty one.
+
+The paths come back as `Ironing` extrusions, so they print at `ironing_speed` and are
+coloured as ironing in the preview, and they are kept in the same unsortable group as the
+extrusions they go over - the exporter cannot reorder a pass to before the surface it is
+meant to smooth.
+
+How much plastic the pass lays down follows from how far apart its lines are, which only
+the plugin knows, so a plugin that does not simply retrace the covering extrusions should
+say:
+
+```lua
+    return {
+        paths      = {{{x = 1.0, y = 1.0}, {x = 9.0, y = 9.0}}},
+        spacing    = 0.1,   -- optional, mm; surface.spacing by default
+        flow_ratio = 0.15   -- optional, 0.15 by default
+    }
+```
+
+`flow_ratio` is the same quantity as the print profile's `ironing_flowrate`: the fraction
+of a full layer of material to put down, so `1.0` deposits as much as a normal extrusion at
+`spacing` would, which over material that is already there doubles it. Values outside 0.0
+to 1.0 are clamped, `0.0` is a pass that only reheats, and a `spacing` or `flow_ratio` that
+is not a number is refused along with the rest of the answer.
+
+`object_above` is what separates a mould from a finish. It is true for the top of a support
+interface, which the object is printed against, and false for a surface with only more
+support coming on top of it. The area is given already inset by half a nozzle diameter, so a
+pass may run right along its boundary without hanging off the edge of what it is smoothing.
+
+Only support interface surfaces are offered at the moment, from both the grid and the
+organic support generators; raft layers and the support base are not. With
+`support_material_interface_layers` set to `0` there are no interface surfaces at all - the
+contact layer is filled as plain support - and nothing is offered.
+
+**This hook is called concurrently.** Like `plan_fill()` and unlike the other slicing hooks,
+`plan_pass()` is reached from a parallel stage of slicing, once per surface across all
+support layers at once. Calls are serialized on the way into Lua, so a plugin does not have
+to be thread safe, but a plugin that answers for every surface of a large print will hold
+that stage up.
 
 ### `slicing.object_labels`
 

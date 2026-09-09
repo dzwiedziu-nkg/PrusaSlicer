@@ -430,7 +430,10 @@ void PrintObjectSupportMaterial::generate(PrintObject &object)
 #endif /* SLIC3R_DEBUG */
 
     // Generate the actual toolpaths and save them into each layer.
-    generate_support_toolpaths(object.support_layers(), *m_object_config, m_support_params, m_slicing_params, raft_layers, bottom_contacts, top_contacts, intermediate_layers, interface_layers, base_interface_layers);
+    // A plugin may ask for an extra pass over the interfaces, for instance to iron the
+    // surface the object is printed against flat. Empty unless one is installed.
+    generate_support_toolpaths(object.support_layers(), *m_object_config, m_support_params, m_slicing_params, raft_layers, bottom_contacts, top_contacts, intermediate_layers, interface_layers, base_interface_layers,
+        object.print()->pass_planner);
 
 #ifdef SLIC3R_DEBUG
     {

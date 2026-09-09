@@ -3506,14 +3506,19 @@ std::string GCodeGenerator::extrude_support(
 {
     static constexpr const auto support_label            = "support material"sv;
     static constexpr const auto support_interface_label  = "support material interface"sv;
+    static constexpr const auto support_ironing_label    = "support material ironing"sv;
 
     std::string gcode;
     if (! support_extrusions.empty()) {
         const double  support_speed            = config.support_material_speed;
         const double  support_interface_speed  = config.support_material_interface_speed.get_abs_value(support_speed);
         for (const GCode::ExtrusionOrder::SupportPath &path : support_extrusions) {
-            const auto   label = path.is_interface ?  support_interface_label : support_label;
-            const double speed = path.is_interface ? support_interface_speed : support_speed;
+            const auto   label = path.is_ironing ? support_ironing_label :
+                                 path.is_interface ? support_interface_label : support_label;
+            // -1 hands the speed back to the role, which is what gives an extra pass over
+            // a support surface the same ironing_speed an extra pass over the object gets.
+            const double speed = path.is_ironing ? -1. :
+                                 path.is_interface ? support_interface_speed : support_speed;
             gcode += this->extrude_smooth_path(path.path, false, label, speed, config);
         }
     }

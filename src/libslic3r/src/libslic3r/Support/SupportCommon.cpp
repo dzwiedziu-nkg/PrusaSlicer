@@ -1556,6 +1556,61 @@ SupportGeneratorLayersPtr generate_support_layers(
     return layers_sorted;
 }
 
+// Offer one just-filled support surface to the pass planner and turn whatever it answers
+// with into extrusions. Returns nothing when no planner is installed or when it wants no
+// extra pass over this surface.
+static ExtrusionEntitiesPtr generate_extra_pass(
+    const PassPlanner::Strategy &pass_planner,
+    // The surface that has just been filled, in the object frame.
+    const ExPolygons            &covered,
+    const Flow                  &flow,
+    // Fraction of the surface the fill lines cover, so the planner can be told how far
+    // apart they ended up rather than how wide they are.
+    double                       density,
+    double                       angle,
+    size_t                       layer_id,
+    double                       print_z,
+    ExtrusionRole                role,
+    // Whether the object will be printed directly onto this surface, which is what makes
+    // ironing it worth the time.
+    bool                         object_above)
+{
+    ExtrusionEntitiesPtr out;
+    if (! pass_planner || density <= 0. || flow.nozzle_diameter() <= 0.)
+        return out;
+
+    // Inset by half a nozzle so a pass running along the boundary still has material
+    // under it, the same trim the slicer's own ironing gives a top surface.
+    const float inset = 0.5f * float(scale_(flow.nozzle_diameter()));
+    for (const ExPolygon &expoly : covered)
+        for (const ExPolygon &area : offset_ex(expoly, - inset)) {
+            const PassPlanner::SurfaceInfo surface {
+                extrusion_role_to_gcode_extrusion_role(role),
+                area,
+                layer_id,
+                print_z,
+                // Support is printed with one extruder throughout, and the flow the
+                // surface was filled with is the one this pass follows.
+                0u,
+                flow.spacing() / density,
+                flow.width(),
+                angle,
+                flow.height(),
+                flow.nozzle_diameter(),
+                object_above
+            };
+            std::optional<PassPlanner::Plan> plan = PassPlanner::plan_pass(pass_planner, surface);
+            if (! plan.has_value())
+                continue;
+            const PassPlanner::PassFlow pass_flow = PassPlanner::pass_flow(surface, *plan);
+            extrusion_entities_append_paths(
+                out, std::move(plan->paths),
+                ExtrusionAttributes{ ExtrusionRole::Ironing,
+                    ExtrusionFlow{ pass_flow.mm3_per_mm, float(pass_flow.width), float(pass_flow.height) } });
+        }
+    return out;
+}
+
 void generate_support_toolpaths(
     SupportLayerPtrs                    &support_layers,
     const PrintObjectConfigView             &config,
@@ -1566,7 +1621,8 @@ void generate_support_toolpaths(
     const SupportGeneratorLayersPtr     &top_contacts,
     const SupportGeneratorLayersPtr     &intermediate_layers,
     const SupportGeneratorLayersPtr     &interface_layers,
-    const SupportGeneratorLayersPtr     &base_interface_layers)
+    const SupportGeneratorLayersPtr     &base_interface_layers,
+    const PassPlanner::Strategy         &pass_planner)
 {
     // loop_interface_processor with a given circle radius.
     LoopInterfaceProcessor loop_interface_processor(1.5 * support_params.support_material_interface_flow.scaled_width());
@@ -1733,6 +1789,17 @@ void generate_support_toolpaths(
         SupportGeneratorLayerExtruded                                     interface_layer;
         SupportGeneratorLayerExtruded                                     base_interface_layer;
         boost::container::static_vector<LayerCacheItem, 5>  nonempty;
+        // Extra passes a plugin asked for, each over the surface of the layer it is
+        // paired with. Kept apart from that layer's own extrusions until the layer
+        // heights have been modulated, which expects nothing but plain paths.
+        boost::container::static_vector<std::pair<const SupportGeneratorLayerExtruded*, ExtrusionEntitiesPtr>, 5> extra_passes;
+
+        ExtrusionEntitiesPtr take_extra_pass(const SupportGeneratorLayerExtruded *over) {
+            for (auto &[layer_extruded, extrusions] : this->extra_passes)
+                if (layer_extruded == over)
+                    return std::move(extrusions);
+            return {};
+        }
 
         void add_nonempty_and_sort() {
             for (SupportGeneratorLayerExtruded *item : { &bottom_contact_layer, &top_contact_layer, &interface_layer, &base_interface_layer, &base_layer })
@@ -1746,7 +1813,7 @@ void generate_support_toolpaths(
 
     tbb::parallel_for(tbb::blocked_range<size_t>(n_raft_layers, support_layers.size()),
         [&config, &slicing_params, &support_params, &support_layers, &bottom_contacts, &top_contacts, &intermediate_layers, &interface_layers, &base_interface_layers, &layer_caches, &loop_interface_processor,
-            &bbox_object, &angles, n_raft_layers, link_max_length_factor]
+            &bbox_object, &angles, &pass_planner, n_raft_layers, link_max_length_factor]
             (const tbb::blocked_range<size_t>& range) {
         // Indices of the 1st layer in their respective container at the support layer height.
         size_t idx_layer_bottom_contact   = size_t(-1);
@@ -1877,15 +1944,28 @@ void generate_support_toolpaths(
                     filler->spacing = raft_contact ? support_params.raft_interface_flow.spacing() :
                         interface_as_base ? support_params.support_material_flow.spacing() : support_params.support_material_interface_flow.spacing();
                     filler->link_max_length = coord_t(scale_(filler->spacing * link_max_length_factor / density));
+                    const ExtrusionRole role = interface_as_base ?
+                        ExtrusionRole::SupportMaterial : ExtrusionRole::SupportMaterialInterface;
+                    ExPolygons areas = union_safety_offset_ex(layer_ex.polygons_to_extrude());
+                    // A plugin may want to go over this surface once more before anything
+                    // is printed onto it. Planned before the fill, which consumes the areas.
+                    ExtrusionEntitiesPtr extra_pass = generate_extra_pass(
+                        pass_planner, areas, interface_flow, density, filler->angle,
+                        support_layer_id, support_layer.print_z, role,
+                        // The object is cast against the top contact layer; every other
+                        // support surface has only more support printed onto it.
+                        &layer_ex == &top_contact_layer);
+                    if (! extra_pass.empty())
+                        layer_cache.extra_passes.emplace_back(&layer_ex, std::move(extra_pass));
                     fill_expolygons_generate_paths(
                         // Destination
                         layer_ex.extrusions, 
                         // Regions to fill
-                        union_safety_offset_ex(layer_ex.polygons_to_extrude()),
+                        std::move(areas),
                         // Filler and its parameters
                         filler, float(density),
                         // Extrusion parameters
-                        interface_as_base ? ExtrusionRole::SupportMaterial : ExtrusionRole::SupportMaterialInterface,
+                        role,
                         interface_flow);
                 }
             };
@@ -2022,7 +2102,21 @@ void generate_support_toolpaths(
             for (LayerCacheItem &layer_cache_item : layer_cache.nonempty) {
                 // Trim the extrusion height from the bottom by the overlapping layers.
                 modulate_extrusion_by_overlapping_layers(layer_cache_item.layer_extruded->extrusions, *layer_cache_item.layer_extruded->layer, layer_cache_item.overlapping);
-                support_layer.support_fills.append(std::move(layer_cache_item.layer_extruded->extrusions));
+                ExtrusionEntitiesPtr extra_pass = layer_cache.take_extra_pass(layer_cache_item.layer_extruded);
+                if (extra_pass.empty()) {
+                    support_layer.support_fills.append(std::move(layer_cache_item.layer_extruded->extrusions));
+                } else {
+                    // An extra pass only means anything after the surface it goes over has
+                    // been laid down, and the G-code exporter is free to reorder the
+                    // entities of a layer. Handing it the fill and the pass as one
+                    // unsortable collection is what keeps them in that order.
+                    auto *eec = new ExtrusionEntityCollection();
+                    eec->no_sort = true;
+                    eec->entities = std::move(layer_cache_item.layer_extruded->extrusions);
+                    layer_cache_item.layer_extruded->extrusions.clear();
+                    append(eec->entities, std::move(extra_pass));
+                    support_layer.support_fills.entities.emplace_back(eec);
+                }
             }
         }
     });

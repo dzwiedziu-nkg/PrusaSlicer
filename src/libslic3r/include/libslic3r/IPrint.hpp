@@ -15,6 +15,7 @@
 #include "libslic3r/GCode/IslandSequencing.hpp"
 #include "libslic3r/GCode/ObjectLabels.hpp"
 #include "libslic3r/IThumbnailImageGenerator.hpp"
+#include "libslic3r/PassPlanner.hpp"
 #include "libslic3r/PrintSteps.hpp"
 #include "libslic3r/SlicingStatus.hpp"
 #include "Slic3r/Domain/PrintStatistics.hpp"
@@ -102,6 +103,15 @@ public:
      * is called concurrently from several threads.
      */
     FillPlanner::Strategy fill_planner;
+
+    /**
+     * Plans an extra pass over an area the slicer has just covered - ironing a support
+     * interface flat, for instance - asked about every support interface surface during
+     * slicing. Empty by default, which runs no extra pass anywhere. Only used by FFF
+     * prints. See PassPlanner - like the fill planner and unlike the G-code hooks, this
+     * one is called concurrently from several threads.
+     */
+    PassPlanner::Strategy pass_planner;
 
     /**
      * Optionally schedules connected islands across layer boundaries. Empty by

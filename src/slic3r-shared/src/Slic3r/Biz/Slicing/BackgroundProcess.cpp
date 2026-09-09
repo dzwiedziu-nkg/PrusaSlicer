@@ -12,6 +12,7 @@
 #include "Slic3r/App/Lua/IslandOrderPlugin.hpp"
 #include "Slic3r/App/Lua/IslandSequencePlugin.hpp"
 #include "Slic3r/App/Lua/ObjectLabelsPlugin.hpp"
+#include "Slic3r/App/Lua/PassPlannerPlugin.hpp"
 #include "Slic3r/Directories.hpp"
 #include "Slic3r/Utils.hpp"
 #include "Slic3r/Version.hpp"
@@ -261,6 +262,12 @@ void BackgroundProcess::slice(
                 );
                 // And a plugin may lay a surface out differently than the stock pattern.
                 print->fill_planner = App::Lua::make_fill_planner(
+                    {resources_dir() + "/lua", data_dir() + "/lua"}
+                );
+                // Or go over a surface a second time once it has been covered, the way
+                // the top of a support interface is ironed flat before the object is
+                // printed against it.
+                print->pass_planner = App::Lua::make_pass_planner(
                     {resources_dir() + "/lua", data_dir() + "/lua"}
                 );
                 print->island_sequencing_strategy = App::Lua::make_island_sequence_strategy(
