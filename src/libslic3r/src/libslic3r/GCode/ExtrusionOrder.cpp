@@ -442,7 +442,10 @@ std::vector<SupportPath> get_support_extrusions(
                         std::optional<InstancePoint> last_position{get_instance_point(previous_position, {0, 0})};
                         auto [path, _]{smooth_path(nullptr, nullptr, {*sub_entity, entity_reference.flipped()}, extruder_id, last_position)};
                         if (!path.empty()) {
-                            paths.push_back({std::move(path), role != ExtrusionRole::SupportMaterial, role == ExtrusionRole::Ironing});
+                            paths.push_back({std::move(path),
+                                role != ExtrusionRole::SupportMaterial,
+                                role == ExtrusionRole::Ironing,
+                                role == ExtrusionRole::SolidInfill});
                         }
                         previous_position = get_gcode_point(last_position, {0, 0});
                     }
