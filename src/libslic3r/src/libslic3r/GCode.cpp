@@ -2813,6 +2813,8 @@ static std::vector<SlicePiece> slice_pieces(
 }
 
 // How much plain extrusion the layer has waiting to be spent at the breaks in an extra pass.
+// Measured off the smoothed paths rather than Purge::volume_of(), because by this point the
+// paths have been through the smoothing stage and are no longer the entities that were laid.
 static double purge_pool_volume(
     const std::vector<GCode::ExtrusionOrder::SupportPath> &support_extrusions
 )
