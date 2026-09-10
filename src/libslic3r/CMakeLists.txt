@@ -316,6 +316,8 @@ set(SLIC3R_SOURCES
     src/libslic3r/PrintObject.cpp
     src/libslic3r/PrintObjectSlice.cpp
     src/libslic3r/PrintRegion.cpp
+    src/libslic3r/Purge.hpp
+    src/libslic3r/Purge.cpp
     src/libslic3r/ShortEdgeCollapse.cpp
     src/libslic3r/ShortEdgeCollapse.hpp
     src/libslic3r/ShortestPath.cpp
