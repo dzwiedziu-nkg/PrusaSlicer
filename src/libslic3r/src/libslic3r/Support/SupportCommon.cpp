@@ -29,6 +29,7 @@
 #include "libslic3r/ExtrusionRole.hpp"
 #include "libslic3r/Flow.hpp"
 #include "libslic3r/LayerRegion.hpp"
+#include "libslic3r/Purge.hpp"
 #include "libslic3r/MultiMaterialSegmentation.hpp"
 #include "libslic3r/Polygon.hpp"
 #include "libslic3r/Polyline.hpp"
@@ -1556,72 +1557,6 @@ SupportGeneratorLayersPtr generate_support_layers(
     return layers_sorted;
 }
 
-// Ordinary extrusion, laid in the empty space inside the object's own infill on this layer,
-// to be spent while an extra pass is interrupted.
-//
-// A pass that starves the extruder has to be broken up, and a break is only worth taking if
-// something goes through the nozzle while it lasts. The layer's own work is the first choice
-// and costs nothing, but a layer often has a single island to give and a long pass needs more
-// breaks than that. The space between sparse infill lines is the next best thing: it is
-// inside the part, it is already at this Z so nothing is laid proud for the next layer's
-// nozzle to hit, and it needs neither a tower nor room on the bed. What it costs is filament,
-// which stays in the object as extra material rather than being thrown away.
-//
-// This is only reachable because posInfill and posIroning run before posSupportMaterial, so
-// the object's own extrusions for this layer already exist by the time a pass is planned.
-static ExtrusionEntitiesPtr generate_purge(
-    const SupportLayer &support_layer,
-    const Flow         &flow,
-    // Total to lay down across the whole layer, in mm3.
-    double              volume)
-{
-    ExtrusionEntitiesPtr out;
-    const PrintObject *object = support_layer.object();
-    if (object == nullptr || volume <= 0. || flow.mm3_per_mm() <= 0.)
-        return out;
-    const Layer *layer = object->get_layer_at_printz(support_layer.print_z, EPSILON);
-    if (layer == nullptr)
-        return out;
-
-    // Room is what the slicer meant to fill, less what it actually put there, less half a bead
-    // so a purge line never lands on material that is already down.
-    const float margin = 0.5f * float(scale_(flow.width()));
-    ExPolygons room;
-    for (const LayerRegion *region : layer->regions()) {
-        Polygons covered = region->fills().polygons_covered_by_width(float(SCALED_EPSILON));
-        append(covered, region->perimeters().polygons_covered_by_width(float(SCALED_EPSILON)));
-        append(room, offset_ex(diff_ex(region->fill_expolygons(), covered), - margin));
-    }
-    if (room.empty())
-        return out;
-
-    std::unique_ptr<Fill> filler(Fill::new_from_type(Domain::InfillPattern::ipRectilinear));
-    filler->angle   = 0.f;
-    filler->spacing = flow.spacing();
-    ExtrusionEntitiesPtr lines;
-    fill_expolygons_generate_paths(
-        lines, std::move(room), filler.get(), 1.f, ExtrusionRole::SolidInfill, flow);
-
-    // A purge is a quantity of plastic, not a pattern: take whole lines until the budget is
-    // met and drop the rest.
-    double taken = 0.;
-    for (ExtrusionEntity *line : lines) {
-        if (taken >= volume) {
-            delete line;
-            continue;
-        }
-        taken += line->total_volume();
-        out.emplace_back(line);
-    }
-    if (taken < volume) {
-        SPDLOG_INFO(
-            "Layer {} had room for {:.1f} mm3 of purge out of the {:.1f} asked for",
-            support_layer.id(), taken, volume
-        );
-    }
-    return out;
-}
-
 // Offer one just-filled support surface to the pass planner and turn whatever it answers
 // with into extrusions. Returns nothing when no planner is installed or when it wants no
 // extra pass over this surface.
@@ -1698,8 +1633,15 @@ static ExtrusionEntitiesPtr generate_extra_pass(
                 const double breaks = std::ceil(
                     unscaled<double>(pass_length) / surface.pass_speed / plan->max_run_time) - 1.;
                 if (breaks > 0.) {
-                    ExtrusionEntitiesPtr purge = generate_purge(
-                        support_layer, flow, breaks * plan->purge_volume);
+                    // The object's own layer at this height is where the room is; the support
+                    // layer only says which height that is. Reachable at all because posInfill
+                    // runs before posSupportMaterial, so those extrusions already exist.
+                    const PrintObject *object = support_layer.object();
+                    const Layer *object_layer = object == nullptr ? nullptr :
+                        object->get_layer_at_printz(support_layer.print_z, EPSILON);
+                    ExtrusionEntitiesPtr purge = object_layer == nullptr ?
+                        ExtrusionEntitiesPtr{} :
+                        Purge::generate(*object_layer, flow, breaks * plan->purge_volume);
                     if (! purge.empty()) {
                         support_layer.extra_pass_purge_volume = plan->purge_volume;
                         append(out, std::move(purge));
