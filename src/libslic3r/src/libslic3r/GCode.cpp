@@ -2812,6 +2812,24 @@ static std::vector<SlicePiece> slice_pieces(
     return pieces;
 }
 
+// How much plain extrusion the layer has waiting to be spent at the breaks in an extra pass.
+static double purge_pool_volume(
+    const std::vector<GCode::ExtrusionOrder::SupportPath> &support_extrusions
+)
+{
+    double volume = 0.;
+    for (const GCode::ExtrusionOrder::SupportPath &path : support_extrusions) {
+        if (! path.is_purge) {
+            continue;
+        }
+        for (const GCode::SmoothPathElement &element : path.path) {
+            volume += element.path_attributes.mm3_per_mm
+                * unscaled<double>(Geometry::ArcWelder::path_length<double>(element.path));
+        }
+    }
+    return volume;
+}
+
 // Where to interrupt a support layer so that an extra pass over it does not run longer
 // than the planner that asked for it dared, PassPlanner::Plan::max_run_time.
 //
@@ -3258,26 +3276,43 @@ LayerResult GCodeGenerator::process_layer(
                 // and comes back. Nothing is wasted and nothing is added to the print; only
                 // the order changes. With no planner installed the layer has no bound and
                 // the breaks come out empty, leaving the emission exactly as it was.
+                // The layer's own work is free but there is only so much of it; the purge
+                // pool the support stage laid in the object's spare infill is what lets a
+                // long pass have as many breaks as it needs.
+                const double purge_volume{
+                    layer_to_print.support_layer != nullptr ?
+                        layer_to_print.support_layer->extra_pass_purge_volume : 0.};
+                const std::size_t purge_breaks{
+                    purge_volume > 0. ?
+                        std::size_t(purge_pool_volume(support_extrusions) / purge_volume) : 0};
                 const std::vector<std::size_t> breaks{extra_pass_breaks(
                     support_extrusions,
                     layer_to_print.support_layer != nullptr ?
                         layer_to_print.support_layer->extra_pass_max_run_time : 0.,
                     print_object_config.ironing_speed,
-                    piece_count
+                    piece_count + purge_breaks
                 )};
                 std::size_t support_from{0};
                 std::size_t piece_from{0};
+                std::size_t purge_from{0};
                 for (const std::size_t support_to : breaks) {
                     m_layer = layer_to_print.support_layer;
                     m_object_layer_over_raft = false;
                     gcode += this->extrude_support(
                         support_extrusions, print_object_config, support_from, support_to
                     );
-                    gcode += this->extrude_slices(
-                        instance, layer_to_print, slices_extrusions, piece_from, piece_from + 1
-                    );
+                    if (purge_volume > 0.) {
+                        gcode += this->extrude_purge(
+                            support_extrusions, print_object_config, purge_from, purge_volume
+                        );
+                    }
+                    if (piece_from < piece_count) {
+                        gcode += this->extrude_slices(
+                            instance, layer_to_print, slices_extrusions, piece_from, piece_from + 1
+                        );
+                        ++piece_from;
+                    }
                     support_from = support_to;
-                    ++piece_from;
                 }
                 m_layer = layer_to_print.support_layer;
                 m_object_layer_over_raft = false;
@@ -3651,6 +3686,11 @@ std::string GCodeGenerator::extrude_support(
         const double  support_interface_speed  = config.support_material_interface_speed.get_abs_value(support_speed);
         for (std::size_t i = first; i < last; ++i) {
             const GCode::ExtrusionOrder::SupportPath &path = support_extrusions[i];
+            if (path.is_purge) {
+                // Not printed in the order it sits here; extrude_purge() spends it at the
+                // breaks in the pass, which is the only reason it exists.
+                continue;
+            }
             const auto   label = path.is_ironing ? support_ironing_label :
                                  path.is_interface ? support_interface_label : support_label;
             // -1 hands the speed back to the role, which is what gives an extra pass over
@@ -3664,11 +3704,42 @@ std::string GCodeGenerator::extrude_support(
             // retraction of its own, so the first millimetres of that extrusion come out
             // starved. Retract on the way out so the pressure is rebuilt from a known
             // state. Only reachable when a pass planner put ironing into a support layer.
-            if (path.is_ironing
-                && (i + 1 == last || !support_extrusions[i + 1].is_ironing)) {
+            std::size_t next = i + 1;
+            while (next < last && support_extrusions[next].is_purge) {
+                ++ next;
+            }
+            if (path.is_ironing && (next == last || !support_extrusions[next].is_ironing)) {
                 gcode += this->retract_and_wipe(config.retract_speed, config.travel_speed);
             }
         }
+    }
+    return gcode;
+}
+
+std::string GCodeGenerator::extrude_purge(
+    const std::vector<GCode::ExtrusionOrder::SupportPath>& support_extrusions,
+    const Biz::Slicing::ExtrudeConfig& config,
+    std::size_t& from,
+    const double volume
+)
+{
+    static constexpr const auto purge_label = "extra pass purge"sv;
+
+    std::string gcode;
+    double spent = 0.;
+    while (from < support_extrusions.size() && spent < volume) {
+        const GCode::ExtrusionOrder::SupportPath &path = support_extrusions[from];
+        ++ from;
+        if (! path.is_purge) {
+            continue;
+        }
+        for (const GCode::SmoothPathElement &element : path.path) {
+            spent += element.path_attributes.mm3_per_mm
+                * unscaled<double>(Geometry::ArcWelder::path_length<double>(element.path));
+        }
+        gcode += this->extrude_smooth_path(
+            path.path, false, purge_label, config.support_material_speed, config
+        );
     }
     return gcode;
 }

@@ -109,6 +109,9 @@ struct SupportPath {
     // An extra pass a plugin asked for over the surface below it, which is printed at the
     // ironing speed rather than at either of the support speeds.
     bool is_ironing;
+    // Plain extrusion laid in the room the object's own infill leaves on this layer, to be
+    // spent while the pass is interrupted rather than in the order it appears here.
+    bool is_purge;
 };
 
 struct NormalExtrusions {

@@ -1556,6 +1556,72 @@ SupportGeneratorLayersPtr generate_support_layers(
     return layers_sorted;
 }
 
+// Ordinary extrusion, laid in the empty space inside the object's own infill on this layer,
+// to be spent while an extra pass is interrupted.
+//
+// A pass that starves the extruder has to be broken up, and a break is only worth taking if
+// something goes through the nozzle while it lasts. The layer's own work is the first choice
+// and costs nothing, but a layer often has a single island to give and a long pass needs more
+// breaks than that. The space between sparse infill lines is the next best thing: it is
+// inside the part, it is already at this Z so nothing is laid proud for the next layer's
+// nozzle to hit, and it needs neither a tower nor room on the bed. What it costs is filament,
+// which stays in the object as extra material rather than being thrown away.
+//
+// This is only reachable because posInfill and posIroning run before posSupportMaterial, so
+// the object's own extrusions for this layer already exist by the time a pass is planned.
+static ExtrusionEntitiesPtr generate_purge(
+    const SupportLayer &support_layer,
+    const Flow         &flow,
+    // Total to lay down across the whole layer, in mm3.
+    double              volume)
+{
+    ExtrusionEntitiesPtr out;
+    const PrintObject *object = support_layer.object();
+    if (object == nullptr || volume <= 0. || flow.mm3_per_mm() <= 0.)
+        return out;
+    const Layer *layer = object->get_layer_at_printz(support_layer.print_z, EPSILON);
+    if (layer == nullptr)
+        return out;
+
+    // Room is what the slicer meant to fill, less what it actually put there, less half a bead
+    // so a purge line never lands on material that is already down.
+    const float margin = 0.5f * float(scale_(flow.width()));
+    ExPolygons room;
+    for (const LayerRegion *region : layer->regions()) {
+        Polygons covered = region->fills().polygons_covered_by_width(float(SCALED_EPSILON));
+        append(covered, region->perimeters().polygons_covered_by_width(float(SCALED_EPSILON)));
+        append(room, offset_ex(diff_ex(region->fill_expolygons(), covered), - margin));
+    }
+    if (room.empty())
+        return out;
+
+    std::unique_ptr<Fill> filler(Fill::new_from_type(Domain::InfillPattern::ipRectilinear));
+    filler->angle   = 0.f;
+    filler->spacing = flow.spacing();
+    ExtrusionEntitiesPtr lines;
+    fill_expolygons_generate_paths(
+        lines, std::move(room), filler.get(), 1.f, ExtrusionRole::SolidInfill, flow);
+
+    // A purge is a quantity of plastic, not a pattern: take whole lines until the budget is
+    // met and drop the rest.
+    double taken = 0.;
+    for (ExtrusionEntity *line : lines) {
+        if (taken >= volume) {
+            delete line;
+            continue;
+        }
+        taken += line->total_volume();
+        out.emplace_back(line);
+    }
+    if (taken < volume) {
+        SPDLOG_INFO(
+            "Layer {} had room for {:.1f} mm3 of purge out of the {:.1f} asked for",
+            support_layer.id(), taken, volume
+        );
+    }
+    return out;
+}
+
 // Offer one just-filled support surface to the pass planner and turn whatever it answers
 // with into extrusions. Returns nothing when no planner is installed or when it wants no
 // extra pass over this surface.
@@ -1577,6 +1643,9 @@ static ExtrusionEntitiesPtr generate_extra_pass(
     // Whether the object will be printed directly onto this surface, which is what makes
     // ironing it worth the time.
     bool                         object_above,
+    // The layer being built, so a plan that wants purging can be given the room the object's
+    // own infill leaves on it.
+    SupportLayer                &support_layer,
     // Set to the shortest run time any plan over this layer asked for, so the caller can
     // break the pass up. Left alone when no plan asks for a bound.
     double                      &max_run_time)
@@ -1616,6 +1685,28 @@ static ExtrusionEntitiesPtr generate_extra_pass(
                 max_run_time = plan->max_run_time;
             }
             const PassPlanner::PassFlow pass_flow = PassPlanner::pass_flow(surface, *plan);
+
+            // Room for the breaks this pass is going to need. Worked out here rather than at
+            // the G-code stage because this is where the geometry of the object's layer can
+            // still be read; the G-code stage only decides how much of it to spend and when.
+            // Once per layer: a second surface asking would lay its lines over the first's.
+            if (plan->purge_volume > 0. && plan->max_run_time > 0. && surface.pass_speed > 0.
+                && support_layer.extra_pass_purge_volume <= 0.) {
+                double pass_length = 0.;
+                for (const Domain::Polyline &path : plan->paths)
+                    pass_length += path.length();
+                const double breaks = std::ceil(
+                    unscaled<double>(pass_length) / surface.pass_speed / plan->max_run_time) - 1.;
+                if (breaks > 0.) {
+                    ExtrusionEntitiesPtr purge = generate_purge(
+                        support_layer, flow, breaks * plan->purge_volume);
+                    if (! purge.empty()) {
+                        support_layer.extra_pass_purge_volume = plan->purge_volume;
+                        append(out, std::move(purge));
+                    }
+                }
+            }
+
             extrusion_entities_append_paths(
                 out, std::move(plan->paths),
                 ExtrusionAttributes{ ExtrusionRole::Ironing,
@@ -1969,6 +2060,7 @@ void generate_support_toolpaths(
                         // The object is cast against the top contact layer; every other
                         // support surface has only more support printed onto it.
                         &layer_ex == &top_contact_layer,
+                        support_layer,
                         support_layer.extra_pass_max_run_time);
                     if (! extra_pass.empty())
                         layer_cache.extra_passes.emplace_back(&layer_ex, std::move(extra_pass));

@@ -137,6 +137,21 @@ struct Plan
      * smoothing.
      */
     double max_run_time{0.};
+    /**
+     * @brief Ordinary extrusion to put through the nozzle at each break, in mm3. 0 for none.
+     *
+     * A break is only worth taking if something moves while it lasts. The layer's own work is
+     * spent first and costs nothing, but a layer often has one island to give and a long pass
+     * needs more breaks than that, so the slicer will also lay plain extrusion in the empty
+     * space inside the object's own infill on this layer - inside the part, at this same Z so
+     * nothing stands proud for the next layer's nozzle, needing neither a tower nor room on
+     * the bed. What it costs is the filament, which stays in the object as extra material.
+     *
+     * A melt zone is 15-40 mm3, so that is the scale at which a break turns it over. There is
+     * only so much empty space on a layer; the slicer lays what it finds room for and says so
+     * in the log when it finds less.
+     */
+    double purge_volume{0.};
 };
 
 /** @brief The extrusion an extra pass is laid down with, in mm and mm3/mm. */
