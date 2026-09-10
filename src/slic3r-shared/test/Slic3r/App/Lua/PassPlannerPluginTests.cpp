@@ -133,6 +133,54 @@ TEST_CASE_METHOD(PluginFixture, "[PassPlannerPlugin] a plan may ask for its own 
     REQUIRE(planned->flow_ratio == Approx(0.2));
 }
 
+TEST_CASE_METHOD(PluginFixture, "[PassPlannerPlugin] a plan may say how long it dares run")
+{
+    const Strategy planner = planner_for(R"(
+        function plan_pass(surface)
+            return {
+                paths = {{{x = 1.0, y = 1.0}, {x = 9.0, y = 9.0}}},
+                max_run_time = 45.0
+            }
+        end
+    )");
+    REQUIRE(static_cast<bool>(planner));
+
+    const ExPolygon region = square();
+    const auto planned = planner(surface(region, GCodeExtrusionRole::SupportMaterialInterface));
+    REQUIRE(planned.has_value());
+    REQUIRE(planned->max_run_time == Approx(45.));
+}
+
+TEST_CASE_METHOD(PluginFixture, "[PassPlannerPlugin] a plan that says nothing runs unbroken")
+{
+    const Strategy planner = planner_for(R"(
+        function plan_pass(surface)
+            return {{{x = 1.0, y = 1.0}, {x = 9.0, y = 9.0}}}
+        end
+    )");
+    REQUIRE(static_cast<bool>(planner));
+
+    const ExPolygon region = square();
+    const auto planned = planner(surface(region, GCodeExtrusionRole::SupportMaterialInterface));
+    REQUIRE(planned.has_value());
+    REQUIRE(planned->max_run_time == 0.);
+}
+
+TEST_CASE_METHOD(PluginFixture, "[PassPlannerPlugin] a run time that is not a number is refused")
+{
+    const ExPolygon region = square();
+    const Strategy planner = planner_for(R"(
+        function plan_pass(surface)
+            return {
+                paths = {{{x = 1.0, y = 1.0}, {x = 9.0, y = 9.0}}},
+                max_run_time = "a while"
+            }
+        end
+    )");
+    REQUIRE(static_cast<bool>(planner));
+    REQUIRE_FALSE(planner(surface(region, GCodeExtrusionRole::SupportMaterialInterface)).has_value());
+}
+
 TEST_CASE_METHOD(PluginFixture, "[PassPlannerPlugin] a spacing or flow that is not a number is refused")
 {
     const ExPolygon region = square();
@@ -301,6 +349,36 @@ TEST_CASE("[PassPlanner] an unusable spacing or flow ratio is corrected")
     const auto fallen_back = Slic3r::PassPlanner::plan_pass(not_a_number, info);
     REQUIRE(fallen_back.has_value());
     REQUIRE(fallen_back->flow_ratio == Approx(Slic3r::PassPlanner::DEFAULT_FLOW_RATIO));
+}
+
+TEST_CASE("[PassPlanner] a run time that is not a length of time runs the pass unbroken")
+{
+    const ExPolygon region = square();
+    const SurfaceInfo info = surface(region, GCodeExtrusionRole::SupportMaterialInterface);
+
+    // A bound is carried through untouched.
+    const Strategy bounded = [](const SurfaceInfo&) {
+        return Plan{path_mm(1., 5., 9., 5.), 0.1, 0.15, 30.};
+    };
+    const auto kept = Slic3r::PassPlanner::plan_pass(bounded, info);
+    REQUIRE(kept.has_value());
+    REQUIRE(kept->max_run_time == Approx(30.));
+
+    // A negative one is not a length of time; run the pass in one piece rather than
+    // breaking it at every path.
+    const Strategy backwards = [](const SurfaceInfo&) {
+        return Plan{path_mm(1., 5., 9., 5.), 0.1, 0.15, -30.};
+    };
+    const auto ignored = Slic3r::PassPlanner::plan_pass(backwards, info);
+    REQUIRE(ignored.has_value());
+    REQUIRE(ignored->max_run_time == 0.);
+
+    const Strategy not_a_number = [](const SurfaceInfo&) {
+        return Plan{path_mm(1., 5., 9., 5.), 0.1, 0.15, std::nan("")};
+    };
+    const auto dropped = Slic3r::PassPlanner::plan_pass(not_a_number, info);
+    REQUIRE(dropped.has_value());
+    REQUIRE(dropped->max_run_time == 0.);
 }
 
 TEST_CASE("[PassPlanner] the flow of a pass is a fraction of a layer")

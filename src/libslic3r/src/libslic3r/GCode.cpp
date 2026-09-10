@@ -2772,6 +2772,101 @@ static bool is_tool_change_before_first_extrusion(
 // In non-sequential mode, process_layer is called per each print_z height with all object and support layers accumulated.
 // For multi-material prints, this routine minimizes extruder switches by gathering extruder specific extrusion paths
 // and performing the extruder specific extrusions together.
+// One piece of an instance's own work on a layer, in emission order: the perimeters of an
+// island, its infill, or a slice's ironing.
+//
+// This is the granularity an interrupted extra pass is spent against, and it is finer than
+// an island on purpose - a layer very often has a single island, and a pass that could only
+// be broken between islands would have nowhere to stop. The two halves of an island are as
+// far as it goes: the nozzle may leave between the perimeters and the infill, but not
+// between one perimeter loop and the next, where the wall would be left to cool mid-way.
+struct SlicePiece
+{
+    std::size_t slice;
+    // npos for the slice's own ironing, which is not part of any island.
+    std::size_t island;
+    bool        perimeters;
+};
+
+static std::vector<SlicePiece> slice_pieces(
+    const std::vector<GCode::ExtrusionOrder::SliceExtrusions> &slices_extrusions
+)
+{
+    std::vector<SlicePiece> pieces;
+    for (std::size_t s = 0; s < slices_extrusions.size(); ++s) {
+        const GCode::ExtrusionOrder::SliceExtrusions &slice = slices_extrusions[s];
+        for (std::size_t i = 0; i < slice.common_extrusions.size(); ++i) {
+            const GCode::ExtrusionOrder::IslandExtrusions &island = slice.common_extrusions[i];
+            // The island decides which of its halves goes first; keep that order exactly.
+            const bool perimeters_first = ! island.infill_first;
+            for (const bool perimeters : {perimeters_first, ! perimeters_first}) {
+                if (perimeters ? ! island.perimeters.empty() : ! island.infill_ranges.empty()) {
+                    pieces.push_back(SlicePiece{s, i, perimeters});
+                }
+            }
+        }
+        if (! slice.ironing_extrusions.empty()) {
+            pieces.push_back(SlicePiece{s, std::numeric_limits<std::size_t>::max(), false});
+        }
+    }
+    return pieces;
+}
+
+// Where to interrupt a support layer so that an extra pass over it does not run longer
+// than the planner that asked for it dared, PassPlanner::Plan::max_run_time.
+//
+// Only the pass itself is timed. The interface fill it goes over runs at an ordinary flow
+// and is what the extruder wants more of, so it neither counts towards the budget nor is a
+// place worth breaking at. Each break costs one piece of the instance's own work, printed
+// at its own flow before the nozzle comes back, so there are never more breaks than there
+// are pieces to spend, and never a break after the last path - there is nothing left to
+// protect by then.
+static std::vector<std::size_t> extra_pass_breaks(
+    const std::vector<GCode::ExtrusionOrder::SupportPath> &support_extrusions,
+    const double max_run_time,
+    const double pass_speed,
+    const std::size_t breaks_available
+)
+{
+    std::vector<std::size_t> breaks;
+    if (max_run_time <= 0. || pass_speed <= 0. || breaks_available == 0) {
+        return breaks;
+    }
+    double total = 0.;
+    for (const GCode::ExtrusionOrder::SupportPath &path : support_extrusions) {
+        if (path.is_ironing) {
+            total += unscaled<double>(GCode::length(path.path)) / pass_speed;
+        }
+    }
+    if (total <= max_run_time) {
+        return breaks;
+    }
+
+    // Spread the breaks evenly rather than running the budget down and leaving whatever is
+    // left in one long tail. When the layer has fewer places to break than the budget asks
+    // for - a layer with one island has two - even runs are the best available: 75 s three
+    // times beats 60 s once and then 166 s, which is most of the way back to not having
+    // broken the pass at all.
+    const std::size_t wanted = std::min<std::size_t>(
+        static_cast<std::size_t>(std::ceil(total / max_run_time)), breaks_available + 1
+    );
+    const double target = total / double(wanted);
+
+    double run = 0.;
+    for (std::size_t i = 0; i + 1 < support_extrusions.size() && breaks.size() + 1 < wanted; ++i) {
+        const GCode::ExtrusionOrder::SupportPath &path = support_extrusions[i];
+        if (! path.is_ironing) {
+            continue;
+        }
+        run += unscaled<double>(GCode::length(path.path)) / pass_speed;
+        if (run >= target) {
+            breaks.push_back(i + 1);
+            run = 0.;
+        }
+    }
+    return breaks;
+}
+
 LayerResult GCodeGenerator::process_layer(
     const Print                    			&print,
     // Set of object & print layers of the same PrintObject and with the same print_z.
@@ -3126,7 +3221,8 @@ LayerResult GCodeGenerator::process_layer(
                 this->initialize_instance(instance, layers[instance.object_layer_to_print_id], i == 0);
                 gcode += this->extrude_slices(
                     instance, layers[instance.object_layer_to_print_id],
-                    overriden_extrusions.slices_extrusions
+                    overriden_extrusions.slices_extrusions,
+                    0, slice_pieces(overriden_extrusions.slices_extrusions).size()
                 );
             }
             if (gcode_size_old < gcode.size()) {
@@ -3147,16 +3243,51 @@ LayerResult GCodeGenerator::process_layer(
             }
             this->initialize_instance(instance, layers[instance.object_layer_to_print_id], i == 0);
 
-            if (!support_extrusions.empty()) {
+            const std::size_t piece_count{slice_pieces(slices_extrusions).size()};
+            if (support_extrusions.empty()) {
+                gcode += this->extrude_slices(
+                    instance, layer_to_print, slices_extrusions, 0, piece_count
+                );
+            } else {
+                const Biz::Slicing::ExtrudeConfig print_object_config{instance.print_object.config()};
+                // An extra pass that starves the extruder for minutes on end cooks the melt
+                // zone and lets heat climb the filament, because at a hundredth of the usual
+                // flow the filament has all but stopped moving. Spend this instance's own
+                // slices in the gaps: the nozzle leaves the surface, prints something at an
+                // ordinary flow - which pulls fresh cold filament through the heat break -
+                // and comes back. Nothing is wasted and nothing is added to the print; only
+                // the order changes. With no planner installed the layer has no bound and
+                // the breaks come out empty, leaving the emission exactly as it was.
+                const std::vector<std::size_t> breaks{extra_pass_breaks(
+                    support_extrusions,
+                    layer_to_print.support_layer != nullptr ?
+                        layer_to_print.support_layer->extra_pass_max_run_time : 0.,
+                    print_object_config.ironing_speed,
+                    piece_count
+                )};
+                std::size_t support_from{0};
+                std::size_t piece_from{0};
+                for (const std::size_t support_to : breaks) {
+                    m_layer = layer_to_print.support_layer;
+                    m_object_layer_over_raft = false;
+                    gcode += this->extrude_support(
+                        support_extrusions, print_object_config, support_from, support_to
+                    );
+                    gcode += this->extrude_slices(
+                        instance, layer_to_print, slices_extrusions, piece_from, piece_from + 1
+                    );
+                    support_from = support_to;
+                    ++piece_from;
+                }
                 m_layer = layer_to_print.support_layer;
                 m_object_layer_over_raft = false;
-                const Biz::Slicing::ExtrudeConfig print_object_config{instance.print_object.config()};
-                gcode += this->extrude_support(support_extrusions, print_object_config);
+                gcode += this->extrude_support(
+                    support_extrusions, print_object_config, support_from, support_extrusions.size()
+                );
+                gcode += this->extrude_slices(
+                    instance, layer_to_print, slices_extrusions, piece_from, piece_count
+                );
             }
-
-            gcode += this->extrude_slices(
-                instance, layer_to_print, slices_extrusions
-            );
         }
         this->set_origin(0.0, 0.0);
     }
@@ -3201,7 +3332,9 @@ void GCodeGenerator::initialize_instance(
 std::string GCodeGenerator::extrude_slices(
     const InstanceToPrint &print_instance,
     const ObjectLayerToPrint &layer_to_print,
-    const std::vector<SliceExtrusions> &slices_extrusions
+    const std::vector<SliceExtrusions> &slices_extrusions,
+    const std::size_t first,
+    const std::size_t last
 ) {
     const PrintObject &print_object = print_instance.print_object;
 
@@ -3211,18 +3344,20 @@ std::string GCodeGenerator::extrude_slices(
         print_object.slicing_parameters().raft_layers() == layer_to_print.object_layer->id();
 
     std::string gcode;
-    for (const SliceExtrusions &slice_extrusions : slices_extrusions) {
-        for (const IslandExtrusions &island_extrusions : slice_extrusions.common_extrusions) {
-            if (island_extrusions.infill_first) {
-                gcode += this->extrude_infill_ranges(island_extrusions.infill_ranges, "infill");
-                gcode += this->extrude_perimeters(*island_extrusions.region, island_extrusions.perimeters, print_instance);
-            } else {
-                gcode += this->extrude_perimeters(*island_extrusions.region, island_extrusions.perimeters, print_instance);
-                gcode += this->extrude_infill_ranges(island_extrusions.infill_ranges, "infill");
-            }
+    const std::vector<SlicePiece> pieces{slice_pieces(slices_extrusions)};
+    for (std::size_t p = first; p < last && p < pieces.size(); ++p) {
+        const SlicePiece &piece = pieces[p];
+        const SliceExtrusions &slice_extrusions = slices_extrusions[piece.slice];
+        if (piece.island == std::numeric_limits<std::size_t>::max()) {
+            gcode += this->extrude_infill_ranges(slice_extrusions.ironing_extrusions, "ironing");
+            continue;
         }
-
-        gcode += this->extrude_infill_ranges(slice_extrusions.ironing_extrusions, "ironing");
+        const IslandExtrusions &island_extrusions = slice_extrusions.common_extrusions[piece.island];
+        if (piece.perimeters) {
+            gcode += this->extrude_perimeters(*island_extrusions.region, island_extrusions.perimeters, print_instance);
+        } else {
+            gcode += this->extrude_infill_ranges(island_extrusions.infill_ranges, "infill");
+        }
     }
 
     return gcode;
@@ -3501,7 +3636,9 @@ std::string GCodeGenerator::extrude_perimeters(
 
 std::string GCodeGenerator::extrude_support(
     const std::vector<GCode::ExtrusionOrder::SupportPath>& support_extrusions,
-    const Biz::Slicing::ExtrudeConfig& config
+    const Biz::Slicing::ExtrudeConfig& config,
+    const std::size_t first,
+    const std::size_t last
 )
 {
     static constexpr const auto support_label            = "support material"sv;
@@ -3509,10 +3646,10 @@ std::string GCodeGenerator::extrude_support(
     static constexpr const auto support_ironing_label    = "support material ironing"sv;
 
     std::string gcode;
-    if (! support_extrusions.empty()) {
+    if (first < last) {
         const double  support_speed            = config.support_material_speed;
         const double  support_interface_speed  = config.support_material_interface_speed.get_abs_value(support_speed);
-        for (std::size_t i = 0; i < support_extrusions.size(); ++i) {
+        for (std::size_t i = first; i < last; ++i) {
             const GCode::ExtrusionOrder::SupportPath &path = support_extrusions[i];
             const auto   label = path.is_ironing ? support_ironing_label :
                                  path.is_interface ? support_interface_label : support_label;
@@ -3528,7 +3665,7 @@ std::string GCodeGenerator::extrude_support(
             // starved. Retract on the way out so the pressure is rebuilt from a known
             // state. Only reachable when a pass planner put ironing into a support layer.
             if (path.is_ironing
-                && (i + 1 == support_extrusions.size() || !support_extrusions[i + 1].is_ironing)) {
+                && (i + 1 == last || !support_extrusions[i + 1].is_ironing)) {
                 gcode += this->retract_and_wipe(config.retract_speed, config.travel_speed);
             }
         }
