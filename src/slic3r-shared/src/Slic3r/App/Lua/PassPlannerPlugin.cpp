@@ -195,8 +195,8 @@ private:
      *
      * Two shapes are accepted. A plain list of paths is run at the spacing of the surface
      * it goes over and at the slicer's own ironing flow. A table carrying the paths under
-     * `paths` may also name the `spacing` they were laid out at and a `flow_ratio` for
-     * them.
+     * `paths` may also name the `spacing` they were laid out at, a `flow_ratio` for them,
+     * and a `max_run_time` in seconds after which the pass wants interrupting.
      */
     static std::optional<PassPlanner::Plan> to_plan(const sol::table& answer)
     {
@@ -233,6 +233,14 @@ private:
                 return std::nullopt;
             }
             plan.flow_ratio = ratio.as<double>();
+        }
+
+        const sol::object run_time = answer["max_run_time"];
+        if (run_time.get_type() != sol::type::none && run_time.get_type() != sol::type::nil) {
+            if (run_time.get_type() != sol::type::number) {
+                return std::nullopt;
+            }
+            plan.max_run_time = run_time.as<double>();
         }
         return plan;
     }

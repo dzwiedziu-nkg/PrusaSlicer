@@ -435,9 +435,10 @@ say:
 
 ```lua
     return {
-        paths      = {{{x = 1.0, y = 1.0}, {x = 9.0, y = 9.0}}},
-        spacing    = 0.1,   -- optional, mm; surface.spacing by default
-        flow_ratio = 0.15   -- optional, 0.15 by default
+        paths        = {{{x = 1.0, y = 1.0}, {x = 9.0, y = 9.0}}},
+        spacing      = 0.1,   -- optional, mm; surface.spacing by default
+        flow_ratio   = 0.15,  -- optional, 0.15 by default
+        max_run_time = 60.0   -- optional, seconds; 0 (unbroken) by default
     }
 ```
 
@@ -460,6 +461,19 @@ minutes is how an ironing pass clogs a nozzle, so a strategy that lets its spaci
 ratio be configured should check the product rather than the parts. The pass is also left with
 a retraction for the same reason: after it, the melt is de-pressurised and the next extrusion
 would otherwise start starved.
+
+`max_run_time` is the other half of that, and the half a large surface cannot escape by
+choosing its flow. A pass takes `area / (spacing x pass_speed)`, so holding a fine spacing
+over a big interface is minutes however the flow is set - and what starves an extruder is a
+low flow held for a long time, because the melt stops turning over and the filament above
+the heat break stops carrying heat away. Measured at 225 C on a 1352 mm2 interface, 226 s
+unbroken clogged the nozzle while 63 s at the same flow did not. A plan that names a
+`max_run_time` is broken into runs no longer than that, and one of the instance's other
+slices is printed in each gap, at its own ordinary flow. Nothing is added to the print and
+nothing is wasted; only the order changes, and each run is left with the same retraction a
+whole pass is. A layer with no other slices to spend, or a plan that says nothing, runs
+unbroken - the pass never simply pauses over the surface it is smoothing. A value that is
+not a non-negative number of seconds is refused along with the rest of the answer.
 
 `object_above` is what separates a mould from a finish. It is true for the top of a support
 interface, which the object is printed against, and false for a surface with only more
