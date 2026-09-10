@@ -273,6 +273,11 @@ public:
     BoundingBoxes               support_islands_bboxes;
     // Extrusion paths for the support base and for the support interface and contacts.
     ExtrusionEntityCollection   support_fills;
+    // Longest an extra pass over this layer may run without a break, in seconds, as asked
+    // for by PassPlanner::Plan::max_run_time. Zero prints the pass in one piece. Kept on
+    // the layer rather than on the paths because it is one property of one pass, and the
+    // only thing that can honour it is whatever is emitting the layer around it.
+    double                      extra_pass_max_run_time{0.};
 
 
     // Is there any valid extrusion assigned to this LayerRegion?

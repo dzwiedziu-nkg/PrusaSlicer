@@ -1576,7 +1576,10 @@ static ExtrusionEntitiesPtr generate_extra_pass(
     ExtrusionRole                role,
     // Whether the object will be printed directly onto this surface, which is what makes
     // ironing it worth the time.
-    bool                         object_above)
+    bool                         object_above,
+    // Set to the shortest run time any plan over this layer asked for, so the caller can
+    // break the pass up. Left alone when no plan asks for a bound.
+    double                      &max_run_time)
 {
     ExtrusionEntitiesPtr out;
     if (! pass_planner || density <= 0. || flow.nozzle_diameter() <= 0.)
@@ -1606,6 +1609,12 @@ static ExtrusionEntitiesPtr generate_extra_pass(
             std::optional<PassPlanner::Plan> plan = PassPlanner::plan_pass(pass_planner, surface);
             if (! plan.has_value())
                 continue;
+            // The shortest bound wins: the layer is emitted as one run of pass paths, so
+            // the pass has to respect whichever of its plans dared least.
+            if (plan->max_run_time > 0.
+                && (max_run_time <= 0. || plan->max_run_time < max_run_time)) {
+                max_run_time = plan->max_run_time;
+            }
             const PassPlanner::PassFlow pass_flow = PassPlanner::pass_flow(surface, *plan);
             extrusion_entities_append_paths(
                 out, std::move(plan->paths),
@@ -1959,7 +1968,8 @@ void generate_support_toolpaths(
                         config.get<double>("ironing_speed"), role,
                         // The object is cast against the top contact layer; every other
                         // support surface has only more support printed onto it.
-                        &layer_ex == &top_contact_layer);
+                        &layer_ex == &top_contact_layer,
+                        support_layer.extra_pass_max_run_time);
                     if (! extra_pass.empty())
                         layer_cache.extra_passes.emplace_back(&layer_ex, std::move(extra_pass));
                     fill_expolygons_generate_paths(

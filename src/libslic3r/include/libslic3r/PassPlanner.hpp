@@ -121,6 +121,22 @@ struct Plan
      * doubles it. Anything outside the range is clamped into it.
      */
     double flow_ratio{DEFAULT_FLOW_RATIO};
+    /**
+     * @brief Longest this pass may run without a break, in seconds. 0 runs it in one go.
+     *
+     * What starves an extruder is not a low flow but a low flow held for a long time: the
+     * melt zone stops turning over and the filament above the heat break stops carrying
+     * heat away, because it has stopped moving. A pass covering a large area at a fine
+     * line spacing cannot avoid this by choosing its flow - the time it takes is
+     * area / (spacing x speed), and none of the three is the planner's to trade freely -
+     * so it says how long it dares run instead, and the slicer breaks the pass up and
+     * spends the layer's other work in the gaps.
+     *
+     * Only a bound. A pass that fits in the time runs unbroken, and a pass with nothing to
+     * interleave with runs unbroken too rather than pausing over the surface it is
+     * smoothing.
+     */
+    double max_run_time{0.};
 };
 
 /** @brief The extrusion an extra pass is laid down with, in mm and mm3/mm. */

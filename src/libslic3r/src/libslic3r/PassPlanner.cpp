@@ -97,7 +97,19 @@ std::optional<Plan> plan_pass(const Strategy& strategy, const SurfaceInfo& surfa
             std::clamp(flow_ratio, MIN_FLOW_RATIO, MAX_FLOW_RATIO) :
             DEFAULT_FLOW_RATIO;
     }
-    return Plan{std::move(clipped), spacing, flow_ratio};
+    // A bound that is not a positive number of seconds is no bound: run the pass in one
+    // piece, which is what every planner that never heard of the field asks for.
+    double max_run_time = planned->max_run_time;
+    if (!std::isfinite(max_run_time) || max_run_time < 0.) {
+        SPDLOG_WARN(
+            "Pass planner asked for a maximum run time of {} on layer {}, which is not a "
+            "length of time; running the pass unbroken",
+            max_run_time,
+            surface.layer_id
+        );
+        max_run_time = 0.;
+    }
+    return Plan{std::move(clipped), spacing, flow_ratio, max_run_time};
 }
 
 PassFlow pass_flow(const SurfaceInfo& surface, const Plan& plan)

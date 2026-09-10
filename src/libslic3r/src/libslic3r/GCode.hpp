@@ -309,15 +309,21 @@ private:
         const bool is_first
     );
 
+    // [first, last) so that a layer can be emitted in pieces, which is what interleaving
+    // an extra pass with the slices around it needs.
     std::string extrude_slices(
         const InstanceToPrint &print_instance,
         const ObjectLayerToPrint &layer_to_print,
-        const std::vector<SliceExtrusions> &slices_extrusions
+        const std::vector<SliceExtrusions> &slices_extrusions,
+        std::size_t first,
+        std::size_t last
     );
 
     std::string extrude_support(
         const std::vector<GCode::ExtrusionOrder::SupportPath>& support_extrusions,
-        const Biz::Slicing::ExtrudeConfig& config
+        const Biz::Slicing::ExtrudeConfig& config,
+        std::size_t first,
+        std::size_t last
     );
 
     enum class EnforceFirstZ {
