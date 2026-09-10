@@ -278,6 +278,10 @@ public:
     // the layer rather than on the paths because it is one property of one pass, and the
     // only thing that can honour it is whatever is emitting the layer around it.
     double                      extra_pass_max_run_time{0.};
+    // How much ordinary extrusion to spend at each of those breaks, in mm3, as asked for by
+    // PassPlanner::Plan::purge_volume. The paths themselves live in support_fills, tagged
+    // with ExtrusionRole::SolidInfill so the G-code stage can tell them from the pass.
+    double                      extra_pass_purge_volume{0.};
 
 
     // Is there any valid extrusion assigned to this LayerRegion?

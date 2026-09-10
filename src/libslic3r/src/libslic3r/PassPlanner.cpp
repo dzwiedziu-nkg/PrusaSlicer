@@ -109,7 +109,18 @@ std::optional<Plan> plan_pass(const Strategy& strategy, const SurfaceInfo& surfa
         );
         max_run_time = 0.;
     }
-    return Plan{std::move(clipped), spacing, flow_ratio, max_run_time};
+    // Same reading as the run time: anything that is not a positive quantity is none.
+    double purge_volume = planned->purge_volume;
+    if (!std::isfinite(purge_volume) || purge_volume < 0.) {
+        SPDLOG_WARN(
+            "Pass planner asked to purge {} mm3 on layer {}, which is not a quantity; "
+            "purging nothing",
+            purge_volume,
+            surface.layer_id
+        );
+        purge_volume = 0.;
+    }
+    return Plan{std::move(clipped), spacing, flow_ratio, max_run_time, purge_volume};
 }
 
 PassFlow pass_flow(const SurfaceInfo& surface, const Plan& plan)

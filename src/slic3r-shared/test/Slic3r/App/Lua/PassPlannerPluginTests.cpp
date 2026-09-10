@@ -166,6 +166,40 @@ TEST_CASE_METHOD(PluginFixture, "[PassPlannerPlugin] a plan that says nothing ru
     REQUIRE(planned->max_run_time == 0.);
 }
 
+TEST_CASE_METHOD(PluginFixture, "[PassPlannerPlugin] a plan may ask for a purge at each break")
+{
+    const Strategy planner = planner_for(R"(
+        function plan_pass(surface)
+            return {
+                paths = {{{x = 1.0, y = 1.0}, {x = 9.0, y = 9.0}}},
+                max_run_time = 60.0,
+                purge_volume = 30.0
+            }
+        end
+    )");
+    REQUIRE(static_cast<bool>(planner));
+
+    const ExPolygon region = square();
+    const auto planned = planner(surface(region, GCodeExtrusionRole::SupportMaterialInterface));
+    REQUIRE(planned.has_value());
+    REQUIRE(planned->purge_volume == Approx(30.));
+}
+
+TEST_CASE_METHOD(PluginFixture, "[PassPlannerPlugin] a purge volume that is not a number is refused")
+{
+    const ExPolygon region = square();
+    const Strategy planner = planner_for(R"(
+        function plan_pass(surface)
+            return {
+                paths = {{{x = 1.0, y = 1.0}, {x = 9.0, y = 9.0}}},
+                purge_volume = "a squirt"
+            }
+        end
+    )");
+    REQUIRE(static_cast<bool>(planner));
+    REQUIRE_FALSE(planner(surface(region, GCodeExtrusionRole::SupportMaterialInterface)).has_value());
+}
+
 TEST_CASE_METHOD(PluginFixture, "[PassPlannerPlugin] a run time that is not a number is refused")
 {
     const ExPolygon region = square();
@@ -379,6 +413,26 @@ TEST_CASE("[PassPlanner] a run time that is not a length of time runs the pass u
     const auto dropped = Slic3r::PassPlanner::plan_pass(not_a_number, info);
     REQUIRE(dropped.has_value());
     REQUIRE(dropped->max_run_time == 0.);
+}
+
+TEST_CASE("[PassPlanner] a purge that is not a quantity purges nothing")
+{
+    const ExPolygon region = square();
+    const SurfaceInfo info = surface(region, GCodeExtrusionRole::SupportMaterialInterface);
+
+    const Strategy asked = [](const SurfaceInfo&) {
+        return Plan{path_mm(1., 5., 9., 5.), 0.1, 0.15, 60., 30.};
+    };
+    const auto kept = Slic3r::PassPlanner::plan_pass(asked, info);
+    REQUIRE(kept.has_value());
+    REQUIRE(kept->purge_volume == Approx(30.));
+
+    const Strategy backwards = [](const SurfaceInfo&) {
+        return Plan{path_mm(1., 5., 9., 5.), 0.1, 0.15, 60., -30.};
+    };
+    const auto ignored = Slic3r::PassPlanner::plan_pass(backwards, info);
+    REQUIRE(ignored.has_value());
+    REQUIRE(ignored->purge_volume == 0.);
 }
 
 TEST_CASE("[PassPlanner] the flow of a pass is a fraction of a layer")

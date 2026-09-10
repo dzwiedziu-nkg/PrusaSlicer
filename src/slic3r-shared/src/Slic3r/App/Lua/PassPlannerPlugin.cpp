@@ -195,8 +195,9 @@ private:
      *
      * Two shapes are accepted. A plain list of paths is run at the spacing of the surface
      * it goes over and at the slicer's own ironing flow. A table carrying the paths under
-     * `paths` may also name the `spacing` they were laid out at, a `flow_ratio` for them,
-     * and a `max_run_time` in seconds after which the pass wants interrupting.
+     * `paths` may also name the `spacing` they were laid out at, a `flow_ratio` for them, a
+     * `max_run_time` in seconds after which the pass wants interrupting, and a
+     * `purge_volume` in mm3 to put through the nozzle at each of those interruptions.
      */
     static std::optional<PassPlanner::Plan> to_plan(const sol::table& answer)
     {
@@ -241,6 +242,14 @@ private:
                 return std::nullopt;
             }
             plan.max_run_time = run_time.as<double>();
+        }
+
+        const sol::object purge = answer["purge_volume"];
+        if (purge.get_type() != sol::type::none && purge.get_type() != sol::type::nil) {
+            if (purge.get_type() != sol::type::number) {
+                return std::nullopt;
+            }
+            plan.purge_volume = purge.as<double>();
         }
         return plan;
     }

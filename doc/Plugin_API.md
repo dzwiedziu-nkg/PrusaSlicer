@@ -438,7 +438,8 @@ say:
         paths        = {{{x = 1.0, y = 1.0}, {x = 9.0, y = 9.0}}},
         spacing      = 0.1,   -- optional, mm; surface.spacing by default
         flow_ratio   = 0.15,  -- optional, 0.15 by default
-        max_run_time = 60.0   -- optional, seconds; 0 (unbroken) by default
+        max_run_time = 60.0,  -- optional, seconds; 0 (unbroken) by default
+        purge_volume = 30.0   -- optional, mm3 per break; 0 (none) by default
     }
 ```
 
@@ -474,6 +475,18 @@ nothing is wasted; only the order changes, and each run is left with the same re
 whole pass is. A layer with no other slices to spend, or a plan that says nothing, runs
 unbroken - the pass never simply pauses over the surface it is smoothing. A value that is
 not a non-negative number of seconds is refused along with the rest of the answer.
+
+`purge_volume` is what makes those breaks work on a layer that has little of its own to give.
+A break is only useful if something goes through the nozzle while it lasts, and one island is
+one break; a pass needing seven has nowhere else to go. So the slicer lays plain extrusion in
+the room the object's own sparse infill leaves on this layer and spends this much of it at
+each break. It is inside the part and at the same Z, so nothing stands proud for the next
+layer's nozzle to hit, and it needs neither a wipe tower nor space on the bed - the cost is
+the filament, which stays in the object as extra material. A melt zone is 15-40 mm3, which is
+the scale at which a break turns it over. Room is finite: the slicer lays what it finds space
+for and logs how much less that was. This is only possible because `posInfill` runs before
+`posSupportMaterial`, so the object's own extrusions for the layer already exist when a pass
+is planned.
 
 `object_above` is what separates a mould from a finish. It is true for the top of a support
 interface, which the object is printed against, and false for a surface with only more

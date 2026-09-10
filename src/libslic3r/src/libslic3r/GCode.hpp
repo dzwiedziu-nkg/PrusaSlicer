@@ -326,6 +326,16 @@ private:
         std::size_t last
     );
 
+    // Spends plain extrusion from the layer's purge pool while an extra pass is interrupted,
+    // advancing `from` past what it used. Stops once `volume` mm3 have gone through the
+    // nozzle, or when the pool runs out.
+    std::string extrude_purge(
+        const std::vector<GCode::ExtrusionOrder::SupportPath>& support_extrusions,
+        const Biz::Slicing::ExtrudeConfig& config,
+        std::size_t& from,
+        double volume
+    );
+
     enum class EnforceFirstZ {
         False,
         True
