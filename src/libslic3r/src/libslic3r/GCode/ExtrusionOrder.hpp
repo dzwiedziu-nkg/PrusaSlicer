@@ -116,6 +116,11 @@ struct SupportPath {
 
 struct NormalExtrusions {
     Point instance_offset;
+    // Plain extrusion to spend before anything else on this layer, when the print is
+    // interrupted on it. First on purpose: the printer comes back from the pause or the colour
+    // change to this patch rather than to a perimeter, so what dripped lands here. See
+    // ResumePlanner.
+    std::vector<SmoothPath> resume_purge;
     std::vector<SupportPath> support_extrusions;
     std::vector<SliceExtrusions> slices_extrusions;
 };

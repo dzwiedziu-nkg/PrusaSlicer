@@ -23,6 +23,7 @@ enum class PluginType
     SlicingExtrusionFilter,
     SlicingFillPlanner,
     SlicingPassPlanner,
+    SlicingResumePlanner,
     SlicingObjectLabels
 };
 
