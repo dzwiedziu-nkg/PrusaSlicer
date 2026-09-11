@@ -14,6 +14,7 @@
 #include "Slic3r/App/Lua/ObjectLabelsPlugin.hpp"
 #include "Slic3r/App/Lua/PassPlannerPlugin.hpp"
 #include "Slic3r/App/Lua/PerimeterPlannerPlugin.hpp"
+#include "Slic3r/App/Lua/SlicePlannerPlugin.hpp"
 #include "Slic3r/App/Lua/ResumePlannerPlugin.hpp"
 #include "Slic3r/Directories.hpp"
 #include "Slic3r/Utils.hpp"
@@ -280,6 +281,12 @@ void BackgroundProcess::slice(
                 // Or give a layer a different wall count than the settings carry, so that a
                 // part can be given more wall where it is loaded and less where it is not.
                 print->perimeter_planner = App::Lua::make_perimeter_planner(
+                    {resources_dir() + "/lua", data_dir() + "/lua"}
+                );
+                // Or bound how far each layer may reach past the one below it, which walked
+                // from the bottom up chamfers the overhangs the printer would otherwise have
+                // to lay onto air.
+                print->slice_planner = App::Lua::make_slice_planner(
                     {resources_dir() + "/lua", data_dir() + "/lua"}
                 );
                 print->island_sequencing_strategy = App::Lua::make_island_sequence_strategy(

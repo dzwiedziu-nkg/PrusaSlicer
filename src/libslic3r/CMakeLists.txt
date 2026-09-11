@@ -371,6 +371,7 @@ set(SLIC3R_SOURCES
     src/libslic3r/SLAPrint.cpp
     src/libslic3r/SLAPrintSteps.cpp
     src/libslic3r/SLAPrintSteps.hpp
+    src/libslic3r/SlicePlanner.cpp
     src/libslic3r/SlicesToTriangleMesh.cpp
     src/libslic3r/SlicesToTriangleMesh.hpp
     src/libslic3r/Slicing.cpp
@@ -439,6 +440,7 @@ set(SLIC3R_PUBLIC_HEADERS
     include/libslic3r/ResumePlanner.hpp
     include/libslic3r/SerializedConfig.hpp
     include/libslic3r/SLAResult.hpp
+    include/libslic3r/SlicePlanner.hpp
     include/libslic3r/Slicing.hpp
     include/libslic3r/ThumbnailImageRequest.hpp
     include/libslic3r/TriangleMeshSlicer.hpp
