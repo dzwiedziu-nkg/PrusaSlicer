@@ -17,6 +17,7 @@
 #include "libslic3r/IThumbnailImageGenerator.hpp"
 #include "libslic3r/PassPlanner.hpp"
 #include "libslic3r/PerimeterPlanner.hpp"
+#include "libslic3r/SlicePlanner.hpp"
 #include "libslic3r/ResumePlanner.hpp"
 #include "libslic3r/PrintSteps.hpp"
 #include "libslic3r/SlicingStatus.hpp"
@@ -129,6 +130,14 @@ public:
      * from several threads.
      */
     PerimeterPlanner::Strategy perimeter_planner;
+
+    /**
+     * Optionally bounds how far a layer's outline may reach past the layer below it, which
+     * walked from the bottom up is a chamfer of the overhangs. Empty by default, which prints
+     * the outline the mesh gives. See SlicePlanner - called once per layer during slicing,
+     * and unlike the fill, pass and perimeter planners never concurrently.
+     */
+    SlicePlanner::Strategy slice_planner;
 
     /**
      * Optionally schedules connected islands across layer boundaries. Empty by

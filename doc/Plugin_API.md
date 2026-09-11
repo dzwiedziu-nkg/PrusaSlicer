@@ -422,6 +422,67 @@ Called from the parallel stage that generates perimeters, so a strategy here is 
 several threads at once and must be thread safe - the Lua bridge serializes itself with a
 mutex, as the fill and pass planners do.
 
+### `slicing.slice_planner`
+
+Given a layer as it comes off the mesh, decide how far its outline may reach past the layer
+below.
+
+Every layer is an outline cut from the mesh at one height, and the slicer prints it whether or
+not the printer can hold it up. Where the mesh juts sideways the result is a 90 degree overhang
+- a bead laid onto air, which curls, drags on the nozzle and generally needs support under it.
+
+The case that motivated the hook is chamfering those overhangs away. Given an angle in the
+convention `support_material_threshold` uses - 90 degrees is vertical and the number is the
+most horizontal slope printable without support - a layer's outline may grow by at most
+`layer_height / tan(theta)` over the layer below, and clipping every layer to that, walking
+upward, is exactly a chamfer of that angle. It appears only where the model juts out and costs
+nothing anywhere else.
+
+```lua
+info = {
+    id = "overhang_chamfer",
+    type = "slicing.slice_planner"
+}
+
+function plan_slice(layer)
+    return {
+        max_overhang = layer.layer_height / math.tan(math.rad(35)),
+        max_overhang_width = 2.0
+    }
+end
+```
+
+`layer` carries `layer_id`, `print_z`, `slice_z`, `layer_height`, `object_height`, `area` - the
+area of the outline in mm2 - and `islands`, how many separate pieces it falls into.
+
+The answer is a distance in mm, or a table naming `max_overhang` and optionally
+`max_overhang_width`, or `nil` to print the outline the mesh gives. **A table that does not name
+`max_overhang` is the same as `nil`**: clipping deletes geometry, so it happens only when a
+plugin asks for it in so many words. Zero is a real answer and a very different one - the
+outline may not widen at all. Distances outside 0 to 1000 mm are clamped and a distance that is
+not a finite number is refused, both of which are guards rather than physical limits.
+
+`max_overhang_width` is the most material that may be cut away, measured as the largest disc
+that fits inside the piece about to be removed, and it is what keeps the clip to the edges. An
+overhang too big to fit under it is left alone in one piece and the support generator deals
+with it as it always did; chamfering only the outer rim of a big ledge would reshape the part
+and still leave an overhang needing support. It is also what bounds a slope shallower than the
+angle asked for: each layer is measured against the outline the layer below was *left* with, so
+the shortfall accumulates until it no longer fits, and the layer is then handed back in full.
+Leaving it at 0 means no limit, which lets the clip eat an entire table top.
+
+Two things are never clipped. The bottom layer, which has nothing under it to be measured
+against. And an island with nothing at all under it, which is a feature starting at that height
+rather than a ledge on one already being printed - trimming it would delete geometry instead of
+chamfering it.
+
+Called once per layer during slicing, strictly from the bottom up, because each layer is
+measured against the outline the layer below was left with. Unlike the fill, pass and perimeter
+planners it is never entered concurrently, so a strategy here needs no lock of its own.
+
+The hook only ever removes. A plugin that wants the outline to grow is asking for a different
+one.
+
 ### `slicing.resume_planner`
 
 Given an interruption in the print and the layer it resumes on, plan what puts the nozzle back
