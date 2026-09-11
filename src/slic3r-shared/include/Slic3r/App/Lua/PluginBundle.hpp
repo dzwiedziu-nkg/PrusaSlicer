@@ -31,6 +31,7 @@ enum class PluginApiType
     SlicingPassPlanner,
     SlicingPerimeterPlanner,
     SlicingResumePlanner,
+    SlicingSlicePlanner,
     SlicingObjectLabels
 };
 

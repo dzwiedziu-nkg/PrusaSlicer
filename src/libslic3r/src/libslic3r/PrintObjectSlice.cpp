@@ -7,6 +7,7 @@
 #include <vector>
 #include <cassert>
 #include <cstddef>
+#include <optional>
 
 #include "libslic3r/ClipperUtils.hpp"
 #include "libslic3r/ElephantFootCompensation.hpp"
@@ -15,6 +16,7 @@
 #include "libslic3r/MultiMaterialSegmentation.hpp"
 #include "libslic3r/Print.hpp"
 #include "libslic3r/ShortestPath.hpp"
+#include "libslic3r/SlicePlanner.hpp"
 #include "admesh/stl.h"
 #include "libslic3r/Feature/Interlocking/InterlockingGenerator.hpp"
 #include "libslic3r/Feature/VirtualExtruder/VirtualExtruder.hpp"
@@ -523,6 +525,98 @@ std::string fix_slicing_errors(LayerPtrs &layers, const std::function<void()> &t
 }
 */
 
+/**
+ * @brief Clips one layer's outline so it reaches at most @p plan.max_overhang past @p reach.
+ *
+ * @p reach is the outline the layer below was left with, already grown by that distance, so
+ * what falls outside it is the part of this layer that would be printed onto air.
+ *
+ * Two things are never cut. An island with nothing at all under it is a feature that starts
+ * here rather than a ledge on one that was already being printed, and trimming it would delete
+ * geometry instead of chamfering it. And a piece too big to fit a disc of
+ * @c plan.max_overhang_width in is a real overhang, which is the support generator's job;
+ * removing it would reshape the part, and removing only its outer rim would leave both a
+ * reshaped part and an overhang still needing support.
+ *
+ * Returns nothing when the layer comes through untouched, so the caller can leave the slices
+ * exactly as they were rather than rebuilding them from an equal answer.
+ */
+static std::optional<ExPolygons> clip_to_reach(
+    const ExPolygons &slices, const ExPolygons &reach, const SlicePlanner::Plan &plan)
+{
+    const float max_removed = scaled<float>(0.5 * plan.max_overhang_width);
+    ExPolygons  dropped;
+    for (const ExPolygon &island : slices) {
+        ExPolygons over = diff_ex(ExPolygons{island}, reach);
+        if (over.empty()) {
+            // Entirely within reach - nothing here would be printed onto air.
+            continue;
+        }
+        if (intersection_ex(ExPolygons{island}, reach).empty()) {
+            continue;
+        }
+        for (ExPolygon &piece : over) {
+            if (max_removed > 0.f && ! offset_ex(piece, - max_removed).empty()) {
+                continue;
+            }
+            dropped.emplace_back(std::move(piece));
+        }
+    }
+    if (dropped.empty()) {
+        return std::nullopt;
+    }
+    // Taking the answer out of the layer, rather than building it up out of the pieces kept,
+    // leaves the islands nothing was removed from as they came - and is one clipper pass
+    // rather than a union of pieces that are adjacent and have to be welded back together.
+    return diff_ex(slices, dropped);
+}
+
+// Called by slice(), after the layers exist and their outlines are final.
+// Offers every layer to the slice planner from the bottom up and clips the ones it bounds, so
+// that the outline may not widen faster than the planner allows. Each layer is measured
+// against the outline the layer below was left with, which is what makes a run of clipped
+// layers a chamfer rather than a staircase, and what keeps a slope the planner dislikes from
+// being whittled away without limit - the shortfall accumulates into the piece being removed
+// until it is too big to remove, and the layer is then handed back in full.
+void PrintObject::clip_overhangs()
+{
+    const SlicePlanner::Strategy &planner = m_print->slice_planner;
+    if (! planner || m_layers.empty())
+        return;
+
+    SPDLOG_DEBUG("Slicing - clipping overhangs");
+    const double object_height = m_layers.back()->print_z;
+    ExPolygons   below;
+    size_t       clipped_layers = 0;
+    for (size_t layer_id = 0; layer_id < m_layers.size(); ++ layer_id) {
+        m_print->throw_if_canceled();
+        Layer &layer = *m_layers[layer_id];
+        double area = 0.;
+        for (const ExPolygon &island : layer.lslices)
+            area += island.area();
+        const std::optional<SlicePlanner::Plan> plan = SlicePlanner::plan_slice(planner,
+            SlicePlanner::LayerInfo{ layer_id, layer.print_z, layer.slice_z, layer.height,
+                object_height, unscaled<double>(unscaled<double>(area)), layer.lslices.size() });
+        // The bottom layer is printed onto the bed, so there is no outline for it to reach
+        // past and nothing a bound could mean there.
+        if (plan.has_value() && layer_id > 0) {
+            const ExPolygons reach = plan->max_overhang > 0. ?
+                offset_ex(below, scaled<float>(plan->max_overhang)) : below;
+            if (std::optional<ExPolygons> clipped = clip_to_reach(layer.lslices, reach, *plan)) {
+                const Polygons trimming = Algorithms::ExPolygon::to_polygons(*clipped);
+                for (LayerRegion *layerm : layer.m_regions)
+                    layerm->trim_surfaces(trimming);
+                layer.make_slices();
+                ++ clipped_layers;
+            }
+        }
+        below = layer.lslices;
+    }
+    if (clipped_layers > 0)
+        SPDLOG_INFO("Slice planner clipped the outline of {} of {} layers of object {}",
+            clipped_layers, m_layers.size(), this->model_object()->name);
+}
+
 // Called by make_perimeters()
 // 1) Decides Z positions of the layers,
 // 2) Initializes layers and their regions
@@ -543,6 +637,11 @@ void PrintObject::slice()
     this->clear_layers();
     m_layers = new_layers(this, generate_object_layers(m_slicing_params, layer_height_profile));
     this->slice_volumes();
+    m_print->throw_if_canceled();
+    // A plugin may bound how far each layer reaches past the one below, which chamfers the
+    // overhangs. Has to run here: the outlines are final, and nothing has yet been decided
+    // from them - surface types, infill regions and support all read the slices later.
+    this->clip_overhangs();
     m_print->throw_if_canceled();
 #if 0
     // Layer::slicing_errors is no more set since 1.41.1 or possibly earlier, thus this code
