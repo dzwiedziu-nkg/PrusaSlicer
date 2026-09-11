@@ -21,6 +21,7 @@ const std::unordered_map<PluginType, std::string> PLUGIN_TYPE_NAMES = {
     {PluginType::SlicingExtrusionFilter, "slicing.extrusion_filter"},
     {PluginType::SlicingFillPlanner, "slicing.fill_planner"},
     {PluginType::SlicingPassPlanner, "slicing.pass_planner"},
+    {PluginType::SlicingResumePlanner, "slicing.resume_planner"},
     {PluginType::SlicingObjectLabels, "slicing.object_labels"}
 };
 
@@ -32,6 +33,7 @@ const std::unordered_map<PluginType, std::string> PLUGIN_ENTRY_POINTS = {
     {PluginType::SlicingExtrusionFilter, "keep_extrusion"},
     {PluginType::SlicingFillPlanner, "plan_fill"},
     {PluginType::SlicingPassPlanner, "plan_pass"},
+    {PluginType::SlicingResumePlanner, "plan_resume"},
     {PluginType::SlicingObjectLabels, "label_region"}
 };
 }

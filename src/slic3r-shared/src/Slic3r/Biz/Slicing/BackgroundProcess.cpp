@@ -13,6 +13,7 @@
 #include "Slic3r/App/Lua/IslandSequencePlugin.hpp"
 #include "Slic3r/App/Lua/ObjectLabelsPlugin.hpp"
 #include "Slic3r/App/Lua/PassPlannerPlugin.hpp"
+#include "Slic3r/App/Lua/ResumePlannerPlugin.hpp"
 #include "Slic3r/Directories.hpp"
 #include "Slic3r/Utils.hpp"
 #include "Slic3r/Version.hpp"
@@ -268,6 +269,11 @@ void BackgroundProcess::slice(
                 // the top of a support interface is ironed flat before the object is
                 // printed against it.
                 print->pass_planner = App::Lua::make_pass_planner(
+                    {resources_dir() + "/lua", data_dir() + "/lua"}
+                );
+                // Or decide what gets the nozzle back into a known state after the print has
+                // been stopped for a pause or a colour change, which it leaves dripping.
+                print->resume_planner = App::Lua::make_resume_planner(
                     {resources_dir() + "/lua", data_dir() + "/lua"}
                 );
                 print->island_sequencing_strategy = App::Lua::make_island_sequence_strategy(

@@ -318,6 +318,7 @@ set(SLIC3R_SOURCES
     src/libslic3r/PrintRegion.cpp
     src/libslic3r/Purge.hpp
     src/libslic3r/Purge.cpp
+    src/libslic3r/ResumePlanner.cpp
     src/libslic3r/ShortEdgeCollapse.cpp
     src/libslic3r/ShortEdgeCollapse.hpp
     src/libslic3r/ShortestPath.cpp
@@ -433,6 +434,7 @@ set(SLIC3R_PUBLIC_HEADERS
     include/libslic3r/InitPrint.hpp
     include/libslic3r/PassPlanner.hpp
     include/libslic3r/PrintSteps.hpp
+    include/libslic3r/ResumePlanner.hpp
     include/libslic3r/SerializedConfig.hpp
     include/libslic3r/SLAResult.hpp
     include/libslic3r/Slicing.hpp

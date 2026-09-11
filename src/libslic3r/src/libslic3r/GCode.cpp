@@ -3118,7 +3118,23 @@ LayerResult GCodeGenerator::process_layer(
         // Otherwise, we will emit the g-code after picking the specific extruder.
 
         std::string custom_gcode = ProcessLayer::emit_custom_gcode_per_print_z(*this, *layer_tools.custom_gcode, m_writer.extruder()->id(), first_extruder_id, print.config());
-        if (layer_tools.custom_gcode->type == CustomGCode::Type::ColorChange) {
+        // A resume planner put a purge at the head of this layer, and the whole point of it is
+        // that the printer comes back from the interruption onto the purge rather than onto a
+        // perimeter. That only happens if the interruption waits for the first extrusion, the
+        // way a colour change already does. Without a purge nothing is deferred and a pause
+        // goes out here, exactly as before.
+        const bool purge_follows = std::any_of(
+            extrusions.begin(), extrusions.end(),
+            [](const ExtruderExtrusions &e) {
+                return std::any_of(
+                    e.normal_extrusions.begin(), e.normal_extrusions.end(),
+                    [](const GCode::ExtrusionOrder::NormalExtrusions &n) {
+                        return !n.resume_purge.empty();
+                    }
+                );
+            }
+        );
+        if (layer_tools.custom_gcode->type == CustomGCode::Type::ColorChange || purge_follows) {
             // We have a color change to do on this layer, but we want to do it immediately before the first extrusion instead of now, in order to fix GH #2672.
             m_pending_pre_extrusion_gcode = custom_gcode;
         } else {
@@ -3262,6 +3278,23 @@ LayerResult GCodeGenerator::process_layer(
                 continue;
             }
             this->initialize_instance(instance, layers[instance.object_layer_to_print_id], i == 0);
+
+            const std::vector<GCode::SmoothPath> &resume_purge{
+                extruder_extrusions.normal_extrusions[i].resume_purge};
+            if (!resume_purge.empty()) {
+                // First on the layer, so the interruption's own G-code - which is emitted at
+                // the first extrusion, after the travel - lands the nozzle here.
+                m_layer = layer_to_print.layer();
+                m_object_layer_over_raft = false;
+                const Biz::Slicing::ExtrudeConfig purge_config{instance.print_object.config()};
+                for (const GCode::SmoothPath &path : resume_purge) {
+                    // -1 hands the speed back to the role, which is solid infill: the purge is
+                    // ordinary extrusion and wants to go at an ordinary speed.
+                    gcode += this->extrude_smooth_path(
+                        path, false, "resume purge"sv, -1., purge_config
+                    );
+                }
+            }
 
             const std::size_t piece_count{slice_pieces(slices_extrusions).size()};
             if (support_extrusions.empty()) {

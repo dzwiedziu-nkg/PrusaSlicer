@@ -7,6 +7,12 @@
 #include "libslic3r/GCode/ExtrusionFilter.hpp"
 #include "libslic3r/GCode/IslandOrdering.hpp"
 #include "libslic3r/GCode/SmoothPath.hpp"
+#include <algorithm>
+
+#include <spdlog/spdlog.h>
+
+#include "libslic3r/Purge.hpp"
+#include "libslic3r/ResumePlanner.hpp"
 #include "libslic3r/ShortestPath.hpp"
 #include "libslic3r/ExtrusionEntity.hpp"
 #include "libslic3r/ExtrusionEntityCollection.hpp"
@@ -507,6 +513,81 @@ std::vector<OverridenExtrusions> get_overriden_extrusions(
     return result;
 }
 
+ResumePlanner::Interruption to_interruption(const Domain::CustomGCode::Type type)
+{
+    using Domain::CustomGCode::Type;
+    switch (type) {
+    case Type::ColorChange: return ResumePlanner::Interruption::ColorChange;
+    case Type::ToolChange:  return ResumePlanner::Interruption::ToolChange;
+    case Type::Template:    return ResumePlanner::Interruption::Template;
+    case Type::Custom:      return ResumePlanner::Interruption::Custom;
+    case Type::PausePrint:
+    default:                return ResumePlanner::Interruption::Pause;
+    }
+}
+
+// Plain extrusion to spend before anything else on this layer, offered to the resume planner
+// because the print is interrupted here. Empty when no planner is installed or when it
+// declines, which is what keeps the stock output untouched.
+std::vector<SmoothPath> extract_resume_purge(
+    const Print &print,
+    const Layer &layer,
+    const Domain::CustomGCode::Item &interruption,
+    const Point &offset,
+    const unsigned extruder_id,
+    const PathSmoothingFunction &smooth_path,
+    std::optional<Point> &previous_position
+) {
+    std::vector<SmoothPath> paths;
+    if (!print.resume_planner || layer.regions().empty()) {
+        return paths;
+    }
+    const LayerRegion &layerm = *layer.regions().front();
+    const Flow flow = layerm.flow(frSolidInfill);
+    if (flow.mm3_per_mm() <= 0. || flow.width() <= 0.) {
+        return paths;
+    }
+
+    const double area = Purge::spare_area(layer, flow);
+    const ResumePlanner::ResumeInfo resume{
+        to_interruption(interruption.type),
+        layer.id(),
+        layer.print_z,
+        extruder_id,
+        layer.height,
+        flow.nozzle_diameter(),
+        area,
+        area / flow.width() * flow.mm3_per_mm()
+    };
+    const std::optional<ResumePlanner::Plan> plan{
+        ResumePlanner::plan_resume(print.resume_planner, resume)};
+    if (!plan.has_value()) {
+        return paths;
+    }
+
+    ExtrusionEntitiesPtr purge{Purge::generate(layer, flow, plan->purge_volume)};
+    if (purge.empty()) {
+        SPDLOG_INFO(
+            "Resume planner asked for {:.1f} mm3 on layer {}, which had no room to spare",
+            plan->purge_volume, layer.id()
+        );
+        return paths;
+    }
+    const PrintRegion &region = print.get_print_region(layerm.region().print_region_id());
+    for (const ExtrusionEntity *entity : purge) {
+        std::optional<InstancePoint> last_position{get_instance_point(previous_position, offset)};
+        auto [path, _]{smooth_path(&layer, &region, {*entity, false}, extruder_id, last_position)};
+        if (!path.empty()) {
+            paths.push_back(std::move(path));
+        }
+        previous_position = get_gcode_point(last_position, offset);
+    }
+    for (ExtrusionEntity *entity : purge) {
+        delete entity;
+    }
+    return paths;
+}
+
 std::vector<NormalExtrusions> get_normal_extrusions(
     const Print &print,
     const GCode::ObjectsLayerToPrint &layers,
@@ -538,6 +619,19 @@ std::vector<NormalExtrusions> get_normal_extrusions(
         }
 
         if (const Layer *layer = layers[instance.object_layer_to_print_id].object_layer; layer) {
+            // Only the first instance that finds room purges; one turnover of the melt serves
+            // every copy on the plate, and the rest would be filament thrown at a solved
+            // problem.
+            if (layer_tools.custom_gcode != nullptr
+                && std::all_of(result.begin(), result.end(), [](const NormalExtrusions &e) {
+                       return e.resume_purge.empty();
+                   })) {
+                result.back().resume_purge = extract_resume_purge(
+                    print, *layer, *layer_tools.custom_gcode, offset, extruder_id, smooth_path,
+                    previous_position
+                );
+            }
+
             const auto should_pick_extrusion{[&layer_tools, &instance, &extruder_id](const ExtrusionEntityCollection &entity_collection, const PrintRegion &region){
                 if (is_overriden(entity_collection, layer_tools, instance.instance_id)) {
                     return false;
