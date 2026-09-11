@@ -102,6 +102,7 @@ void LayerRegion::make_perimeters(
 {
     m_perimeters.clear();
     m_thin_fills.clear();
+    m_planned_extra_perimeters = 0;
 
     perimeter_and_gapfill_ranges.reserve(perimeter_and_gapfill_ranges.size() + slices.size());
     // There may be more expolygons produced per slice, thus this reserve is conservative.
@@ -151,6 +152,8 @@ void LayerRegion::make_perimeters(
             if (const std::optional<PerimeterPlanner::Plan> plan =
                     PerimeterPlanner::plan_perimeters(planner, info); plan.has_value()) {
                 params.perimeters_override = plan->perimeters;
+                m_planned_extra_perimeters = plan->perimeters > info.perimeters ?
+                    unsigned(plan->perimeters - info.perimeters) : 0u;
             }
         }
     }

@@ -1131,6 +1131,26 @@ void PrintObject::process_external_surfaces()
     }
 } // void PrintObject::process_external_surfaces()
 
+// The area a layer's walls left behind, measured as if any walls a PerimeterPlanner added
+// beyond the settings' count were not there.
+//
+// The vertical shell check treats whatever lies outside this area as shell that the layers
+// above and below have to back up. A wall that is only on every other layer would otherwise
+// have solid infill laid under it on the layers that do not have it - welding the alternation
+// back into one continuous face, which is the whole thing the extra wall was added to break
+// up. Clipped back to the slice so the expansion cannot reach past the part.
+static Polygons shell_hole_of(const LayerRegion &layerm, const ExPolygons &lslices)
+{
+    const unsigned extra = layerm.planned_extra_perimeters();
+    if (extra == 0) {
+        return Algorithms::ExPolygon::to_polygons(layerm.fill_expolygons());
+    }
+    return Algorithms::ExPolygon::to_polygons(intersection_ex(
+        offset_ex(layerm.fill_expolygons(),
+                  float(extra) * float(layerm.flow(frPerimeter).scaled_spacing())),
+        lslices));
+}
+
 void PrintObject::discover_vertical_shells()
 {
     SPDLOG_INFO("Discovering vertical shells... {}", log_memory_info());
@@ -1213,7 +1233,7 @@ void PrintObject::discover_vertical_shells()
                                 0.5f * float(extflow.scaled_width() + extflow.scaled_spacing()) + (float(perimeters) - 1.f) * flow.scaled_spacing());
                             perimeter_min_spacing = std::min(perimeter_min_spacing, float(std::min(extflow.scaled_spacing(), flow.scaled_spacing())));
                         }
-                        Slic3r::append(cache.holes, Algorithms::ExPolygon::to_polygons(layerm.fill_expolygons()));
+                        Slic3r::append(cache.holes, shell_hole_of(layerm, layer.lslices));
                     }
                     // Save some computing time by reducing the number of polygons.
                     cache.top_surfaces    = union_(cache.top_surfaces);
@@ -1273,7 +1293,8 @@ void PrintObject::discover_vertical_shells()
                         // Holes over all regions. Only collect them once, they are valid for all region_id iterations.
                         if (cache.holes.empty()) {
                             for (size_t region_id = 0; region_id < layer.regions().size(); ++ region_id)
-                                Slic3r::append(cache.holes, Algorithms::ExPolygon::to_polygons(layer.regions()[region_id]->fill_expolygons()));
+                                Slic3r::append(cache.holes,
+                                    shell_hole_of(*layer.regions()[region_id], layer.lslices));
                         }
                     }
                 });
