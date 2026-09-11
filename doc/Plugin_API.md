@@ -425,18 +425,16 @@ mutex, as the fill and pass planners do.
 ### `slicing.slice_planner`
 
 Given a layer as it comes off the mesh, decide how far its outline may reach past the layer
-below.
+below - and, where it reaches too far, whether to cut it off or to hold it up.
 
 Every layer is an outline cut from the mesh at one height, and the slicer prints it whether or
 not the printer can hold it up. Where the mesh juts sideways the result is a 90 degree overhang
 - a bead laid onto air, which curls, drags on the nozzle and generally needs support under it.
 
-The case that motivated the hook is chamfering those overhangs away. Given an angle in the
-convention `support_material_threshold` uses - 90 degrees is vertical and the number is the
-most horizontal slope printable without support - a layer's outline may grow by at most
-`layer_height / tan(theta)` over the layer below, and clipping every layer to that, walking
-upward, is exactly a chamfer of that angle. It appears only where the model juts out and costs
-nothing anywhere else.
+Given an angle in the convention `support_material_threshold` uses - 90 degrees is vertical and
+the number is the most horizontal slope printable without support - one layer's outline may sit
+at most `layer_height / tan(theta)` outside the one below it, and a run of layers held to that
+is a slope of exactly that angle.
 
 ```lua
 info = {
@@ -447,7 +445,8 @@ info = {
 function plan_slice(layer)
     return {
         max_overhang = layer.layer_height / math.tan(math.rad(35)),
-        max_overhang_width = 2.0
+        max_overhang_width = 2.0,
+        remedy = "clip"                 -- or "fill"
     }
 end
 ```
@@ -456,32 +455,44 @@ end
 area of the outline in mm2 - and `islands`, how many separate pieces it falls into.
 
 The answer is a distance in mm, or a table naming `max_overhang` and optionally
-`max_overhang_width`, or `nil` to print the outline the mesh gives. **A table that does not name
-`max_overhang` is the same as `nil`**: clipping deletes geometry, so it happens only when a
-plugin asks for it in so many words. Zero is a real answer and a very different one - the
+`max_overhang_width` and `remedy`, or `nil` to print the outline the mesh gives. **A table that
+does not name `max_overhang` is the same as `nil`**: the hook rewrites geometry, so it acts only
+when a plugin asks for it in so many words. Zero is a real answer and a very different one - the
 outline may not widen at all. Distances outside 0 to 1000 mm are clamped and a distance that is
 not a finite number is refused, both of which are guards rather than physical limits.
 
-`max_overhang_width` is the most material that may be cut away, measured as the largest disc
-that fits inside the piece about to be removed, and it is what keeps the clip to the edges. An
-overhang too big to fit under it is left alone in one piece and the support generator deals
-with it as it always did; chamfering only the outer rim of a big ledge would reshape the part
-and still leave an overhang needing support. It is also what bounds a slope shallower than the
-angle asked for: each layer is measured against the outline the layer below was *left* with, so
-the shortfall accumulates until it no longer fits, and the layer is then handed back in full.
-Leaving it at 0 means no limit, which lets the clip eat an entire table top.
+### The two remedies
 
-Two things are never clipped. The bottom layer, which has nothing under it to be measured
-against. And an island with nothing at all under it, which is a feature starting at that height
-rather than a ledge on one already being printed - trimming it would delete geometry instead of
-chamfering it.
+`remedy` says what to do about material that falls outside the bound, and defaults to `"clip"`
+so that a bare number, or a table from before the field existed, still means what it meant.
 
-Called once per layer during slicing, strictly from the bottom up, because each layer is
-measured against the outline the layer below was left with. Unlike the fill, pass and perimeter
-planners it is never entered concurrently, so a strategy here needs no lock of its own.
+- **`"clip"`** takes the offending material off the *upper* layer, walking upward. The overhang
+  is chamfered away and the part comes out a little smaller. Two things are never clipped: the
+  bottom layer, which has nothing under it to be measured against, and an island with nothing at
+  all under it, which is a feature starting at that height rather than a ledge on one already
+  being printed - trimming that would delete geometry instead of chamfering it.
+- **`"fill"`** puts material under it instead, walking downward, so each layer is made to cover
+  at least the layer above shrunk by `max_overhang`. The overhang is carried on a cone of new
+  material down to whatever holds it up, the part comes out larger and nothing of the mesh is
+  lost. This is what OrcaSlicer calls `make_overhang_printable`. On a multi-material print the
+  new material belongs to whichever region of the layer above sits over it.
 
-The hook only ever removes. A plugin that wants the outline to grow is asking for a different
-one.
+`max_overhang_width` bounds how much may be cut away or added, measured as the largest disc that
+fits inside the piece in question; an overhang too big to fit under it is left alone in one
+piece. Under `"clip"` that is what keeps it to the edges - chamfering only the outer rim of a big
+ledge would reshape the part *and* still leave an overhang needing support - and it is also what
+bounds a slope shallower than the angle asked for, since each layer is measured against the
+outline the layer below was *left* with, so the shortfall accumulates until it no longer fits and
+the layer is handed back in full. Under `"fill"` it bounds the cone, and 0 - no limit - is the
+ordinary setting there, because the point is usually to carry an overhang of any size and a cone
+cannot run away in any case: it terminates where it meets the part or the bed.
+
+Called once per layer during slicing, before anything is changed, so a plugin always sees the
+outlines the mesh gave. The answers are then applied as two passes, every `"clip"` layer bottom
+up and then every `"fill"` layer top down, because each layer is measured against the outline its
+neighbour was left with - which is what makes a run of them a slope rather than a staircase.
+Unlike the fill, pass and perimeter planners it is never entered concurrently, so a strategy here
+needs no lock of its own.
 
 ### `slicing.resume_planner`
 

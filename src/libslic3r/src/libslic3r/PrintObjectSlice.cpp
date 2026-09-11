@@ -571,50 +571,145 @@ static std::optional<ExPolygons> clip_to_reach(
     return diff_ex(slices, dropped);
 }
 
+/**
+ * @brief Widens one layer so it carries @p needed, and says whether it had to.
+ *
+ * The new material belongs to whichever region of the layer above sits over it, so that a
+ * multi-material part carries the cone in the same material as the thing it is holding up.
+ * Anything left unclaimed - the layer above may have no region there at all - goes to the
+ * first region, which for the single region prints this mostly runs on is every bit of it.
+ */
+static bool widen_to_carry(
+    Layer &layer, const Layer &above, const ExPolygons &needed, float reach, float max_added)
+{
+    ExPolygons extra = diff_ex(needed, layer.lslices);
+    if (max_added > 0.f) {
+        ExPolygons within;
+        for (ExPolygon &piece : extra) {
+            if (offset_ex(piece, - max_added).empty()) {
+                within.emplace_back(std::move(piece));
+            }
+        }
+        extra = std::move(within);
+    }
+    if (extra.empty()) {
+        return false;
+    }
+
+    const size_t region_count = layer.region_count();
+    for (size_t region_id = 0; region_id < region_count && ! extra.empty(); ++ region_id) {
+        ExPolygons mine;
+        if (region_id + 1 == region_count) {
+            // Last one takes whatever is left, so nothing is silently dropped.
+            mine = std::move(extra);
+            extra.clear();
+        } else {
+            if (region_id >= above.region_count()) {
+                continue;
+            }
+            const ExPolygons over = to_expolygons(above.get_region(int(region_id))->slices().surfaces);
+            if (over.empty()) {
+                continue;
+            }
+            mine = intersection_ex(extra, offset_ex(over, reach));
+            if (mine.empty()) {
+                continue;
+            }
+            extra = diff_ex(extra, mine);
+        }
+        layer.get_region(int(region_id))->add_surfaces(mine);
+    }
+    layer.make_slices();
+    return true;
+}
+
 // Called by slice(), after the layers exist and their outlines are final.
-// Offers every layer to the slice planner from the bottom up and clips the ones it bounds, so
-// that the outline may not widen faster than the planner allows. Each layer is measured
-// against the outline the layer below was left with, which is what makes a run of clipped
-// layers a chamfer rather than a staircase, and what keeps a slope the planner dislikes from
-// being whittled away without limit - the shortfall accumulates into the piece being removed
-// until it is too big to remove, and the layer is then handed back in full.
-void PrintObject::clip_overhangs()
+// Offers every layer to the slice planner and then holds the ones it bounds to their bound.
+//
+// Every layer is offered before anything is changed, so the planner always sees the outlines
+// the mesh gave rather than a part-modified part. The answers are then applied as two passes,
+// because the two remedies walk in opposite directions: Clip upward, taking material off a
+// layer that reaches too far past the one below it, then Fill downward, putting material under
+// a layer that reaches too far past the one below it. Either way each layer is measured against
+// the outline its neighbour was *left* with, which is what makes a run of them a slope rather
+// than a staircase - and, for Clip, what keeps a shallow slope from being whittled away without
+// limit, since the shortfall accumulates into the piece being removed until it is too big to
+// remove and the layer is handed back in full.
+void PrintObject::apply_slice_plans()
 {
     const SlicePlanner::Strategy &planner = m_print->slice_planner;
     if (! planner || m_layers.empty())
         return;
 
-    SPDLOG_DEBUG("Slicing - clipping overhangs");
     const double object_height = m_layers.back()->print_z;
-    ExPolygons   below;
-    size_t       clipped_layers = 0;
+    std::vector<std::optional<SlicePlanner::Plan>> plans(m_layers.size());
+    size_t to_clip = 0;
+    size_t to_fill = 0;
     for (size_t layer_id = 0; layer_id < m_layers.size(); ++ layer_id) {
         m_print->throw_if_canceled();
-        Layer &layer = *m_layers[layer_id];
+        const Layer &layer = *m_layers[layer_id];
         double area = 0.;
         for (const ExPolygon &island : layer.lslices)
             area += island.area();
-        const std::optional<SlicePlanner::Plan> plan = SlicePlanner::plan_slice(planner,
+        plans[layer_id] = SlicePlanner::plan_slice(planner,
             SlicePlanner::LayerInfo{ layer_id, layer.print_z, layer.slice_z, layer.height,
                 object_height, unscaled<double>(unscaled<double>(area)), layer.lslices.size() });
-        // The bottom layer is printed onto the bed, so there is no outline for it to reach
-        // past and nothing a bound could mean there.
-        if (plan.has_value() && layer_id > 0) {
-            const ExPolygons reach = plan->max_overhang > 0. ?
-                offset_ex(below, scaled<float>(plan->max_overhang)) : below;
-            if (std::optional<ExPolygons> clipped = clip_to_reach(layer.lslices, reach, *plan)) {
-                const Polygons trimming = Algorithms::ExPolygon::to_polygons(*clipped);
-                for (LayerRegion *layerm : layer.m_regions)
-                    layerm->trim_surfaces(trimming);
-                layer.make_slices();
-                ++ clipped_layers;
-            }
-        }
-        below = layer.lslices;
+        if (plans[layer_id].has_value())
+            ++ (plans[layer_id]->remedy == SlicePlanner::Remedy::Fill ? to_fill : to_clip);
     }
-    if (clipped_layers > 0)
-        SPDLOG_INFO("Slice planner clipped the outline of {} of {} layers of object {}",
-            clipped_layers, m_layers.size(), this->model_object()->name);
+    if (to_clip == 0 && to_fill == 0)
+        return;
+
+    size_t clipped = 0;
+    if (to_clip > 0) {
+        SPDLOG_DEBUG("Slicing - clipping overhangs");
+        // The bottom layer is printed onto the bed, so there is no outline for it to reach past
+        // and nothing a bound could mean there.
+        ExPolygons below = m_layers.front()->lslices;
+        for (size_t layer_id = 1; layer_id < m_layers.size(); ++ layer_id) {
+            m_print->throw_if_canceled();
+            Layer &layer = *m_layers[layer_id];
+            const std::optional<SlicePlanner::Plan> &plan = plans[layer_id];
+            if (plan.has_value() && plan->remedy == SlicePlanner::Remedy::Clip) {
+                const ExPolygons reach = plan->max_overhang > 0. ?
+                    offset_ex(below, scaled<float>(plan->max_overhang)) : below;
+                if (std::optional<ExPolygons> kept = clip_to_reach(layer.lslices, reach, *plan)) {
+                    const Polygons trimming = Algorithms::ExPolygon::to_polygons(*kept);
+                    for (LayerRegion *layerm : layer.m_regions)
+                        layerm->trim_surfaces(trimming);
+                    layer.make_slices();
+                    ++ clipped;
+                }
+            }
+            below = layer.lslices;
+        }
+    }
+
+    size_t widened = 0;
+    if (to_fill > 0) {
+        SPDLOG_DEBUG("Slicing - carrying overhangs from below");
+        // The top layer has nothing above it to be measured against.
+        for (size_t layer_id = m_layers.size() - 1; layer_id-- > 0; ) {
+            m_print->throw_if_canceled();
+            Layer &layer = *m_layers[layer_id];
+            const std::optional<SlicePlanner::Plan> &plan = plans[layer_id];
+            if (! plan.has_value() || plan->remedy != SlicePlanner::Remedy::Fill)
+                continue;
+            const Layer &above = *m_layers[layer_id + 1];
+            const float  reach = scaled<float>(plan->max_overhang);
+            // What this layer would have to cover for the one above to be within the bound.
+            const ExPolygons needed = reach > 0.f ? offset_ex(above.lslices, - reach) : above.lslices;
+            if (needed.empty())
+                continue;
+            if (widen_to_carry(layer, above, needed, reach,
+                    scaled<float>(0.5 * plan->max_overhang_width)))
+                ++ widened;
+        }
+    }
+
+    if (clipped > 0 || widened > 0)
+        SPDLOG_INFO("Slice planner clipped {} and widened {} of the {} layers of object {}",
+            clipped, widened, m_layers.size(), this->model_object()->name);
 }
 
 // Called by make_perimeters()
@@ -638,10 +733,11 @@ void PrintObject::slice()
     m_layers = new_layers(this, generate_object_layers(m_slicing_params, layer_height_profile));
     this->slice_volumes();
     m_print->throw_if_canceled();
-    // A plugin may bound how far each layer reaches past the one below, which chamfers the
-    // overhangs. Has to run here: the outlines are final, and nothing has yet been decided
-    // from them - surface types, infill regions and support all read the slices later.
-    this->clip_overhangs();
+    // A plugin may bound how far each layer reaches past the one below - chamfering the
+    // overhangs off, or carrying them on new material from underneath. Has to run here: the
+    // outlines are final, and nothing has yet been decided from them - surface types, infill
+    // regions and support all read the slices later.
+    this->apply_slice_plans();
     m_print->throw_if_canceled();
 #if 0
     // Layer::slicing_errors is no more set since 1.41.1 or possibly earlier, thus this code

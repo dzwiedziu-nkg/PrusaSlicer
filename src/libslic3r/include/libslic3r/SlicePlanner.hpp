@@ -14,26 +14,34 @@
  *
  * The case that motivated the hook is chamfering those overhangs away. Given an angle - the
  * one @c support_material_threshold is expressed in, where 90 degrees is vertical and the
- * number is the most horizontal slope printable without support - a layer's outline may grow
- * by at most @c layer_height/tan(theta) over the layer below, and clipping each layer to that,
- * walking upward, is exactly a chamfer of that angle. It appears only where the model juts
- * out and costs nothing anywhere else.
+ * number is the most horizontal slope printable without support - one layer's outline may sit
+ * at most @c layer_height/tan(theta) outside the one below it, and a run of layers held to
+ * that is a slope of exactly that angle.
  *
- * The hook is deliberately not "chamfer overhangs". What it offers is a per-layer bound on the
- * silhouette, and the interesting part of the decision - which angle, at which heights, how
- * much of the part may be given up for it - is a property of the part and of what it is for.
- * The same mechanism serves a plugin that makes only the first few millimetres self supporting
- * so a part can be printed without a brim's worth of support under its skirt, one that
- * tightens the angle towards the top of a tall part where a curled overhang would be hit by
- * the nozzle on the way round, and one that leaves the model alone below a given Z.
+ * There are two ways to hold them to it, and the plugin picks per layer:
  *
- * What it cannot do is add material: a clip only ever removes. A plugin that wants the outline
- * to grow is asking for a different hook.
+ *  - @c Remedy::Clip takes the offending material off the upper layer, walking upward. The
+ *    overhang is chamfered away and the part comes out a little smaller.
+ *  - @c Remedy::Fill puts material under it instead, walking downward, so the overhang is
+ *    carried on a cone of new material down to whatever holds it up. The part comes out
+ *    larger and nothing of the mesh is lost. This is what OrcaSlicer calls
+ *    @c make_overhang_printable.
  *
- * Threading: called from PrintObject::slice(), once per layer, strictly in order from the
- * bottom up, because each layer is measured against the outline the layer below was left with.
- * Unlike the fill, pass and perimeter planners this one is never entered concurrently, so an
- * implementation backed by a runtime that is not thread safe needs no lock of its own.
+ * The hook is deliberately neither of those by name. What it offers is a per-layer bound on
+ * how far consecutive outlines may differ, and the interesting part of the decision - which
+ * angle, at which heights, how much of the part may be given up or gained for it - is a
+ * property of the part and of what it is for. The same mechanism serves a plugin that makes
+ * only the first few millimetres self supporting so a part can be printed without a brim's
+ * worth of support under its skirt, one that tightens the angle towards the top of a tall part
+ * where a curled overhang would be hit by the nozzle on the way round, and one that leaves the
+ * model alone below a given Z.
+ *
+ * Threading: called from PrintObject::slice(), once per layer, before anything is changed, so
+ * every plugin sees the outlines the mesh gave. The two remedies are then applied as two
+ * passes - every Clip layer bottom up, then every Fill layer top down - because each layer is
+ * measured against the outline its neighbour was left with. Unlike the fill, pass and
+ * perimeter planners this one is never entered concurrently, so an implementation backed by a
+ * runtime that is not thread safe needs no lock of its own.
  */
 namespace Slic3r::SlicePlanner {
 
@@ -72,6 +80,15 @@ constexpr double UNBOUNDED = -1.;
  */
 constexpr double MAX_DISTANCE = 1000.;
 
+/** @brief What to do about material that falls outside the bound. */
+enum class Remedy
+{
+    /** @brief Cut it off the upper layer. The part loses the overhang. */
+    Clip,
+    /** @brief Carry it on new material added to the layers below. The part gains a cone. */
+    Fill
+};
+
 /** @brief What this layer's outline is allowed to be. */
 struct Plan
 {
@@ -85,20 +102,26 @@ struct Plan
     double max_overhang{UNBOUNDED};
 
     /**
-     * @brief The most material that may be cut away, in mm, or 0 for no limit.
+     * @brief The most material that may be cut away or added, in mm, or 0 for no limit.
      *
-     * Measured as the largest disc that fits inside the piece about to be removed. An overhang
-     * too big to fit under it is left alone in one piece, which is what keeps the clip from
-     * quietly eating a table top, and - because the piece about to be removed is measured
-     * against the outline the layer below was *left* with, not against the mesh - what keeps a
-     * slope shallower than theta from being whittled down layer after layer. A slope like that
-     * falls at most this far behind the mesh before it is handed back in full.
+     * Measured as the largest disc that fits inside the piece in question. An overhang too big
+     * to fit under it is left alone in one piece.
      *
-     * Leaving it at 0 means the clip is free to remove an overhang of any size. That is what a
-     * plugin deliberately reshaping a part wants and is the wrong thing for a plugin meant to
-     * chamfer an edge.
+     * Under @c Remedy::Clip that is what keeps the clip from quietly eating a table top, and -
+     * because the piece about to be removed is measured against the outline the layer below was
+     * *left* with, not against the mesh - what keeps a slope shallower than theta from being
+     * whittled down layer after layer. A slope like that falls at most this far behind the mesh
+     * before it is handed back in full. Leaving it at 0 there means the clip is free to remove
+     * an overhang of any size, which is the wrong thing for a plugin meant to chamfer an edge.
+     *
+     * Under @c Remedy::Fill it bounds the cone instead, and 0 is the ordinary setting: the
+     * whole point is usually to carry an overhang of any size, and a cone cannot run away in
+     * any case because it terminates where it meets the part or the bed.
      */
     double max_overhang_width{0.};
+
+    /** @brief Whether the overhang is cut off above or carried from below. */
+    Remedy remedy{Remedy::Clip};
 };
 
 using Strategy = std::function<std::optional<Plan>(const LayerInfo& layer)>;

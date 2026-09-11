@@ -434,7 +434,7 @@ private:
     void calculate_overhanging_perimeters();
 
     void slice_volumes();
-    void clip_overhangs();
+    void apply_slice_plans();
     // Has any support (not counting the raft).
     void detect_surfaces_type();
     void process_external_surfaces();
