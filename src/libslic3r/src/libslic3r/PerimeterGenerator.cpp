@@ -1034,7 +1034,7 @@ void PerimeterGenerator::process_arachne(
     // we need to process each island separately because we might have different
     // extra perimeters for each one
     // detect how many perimeters must be generated for this island
-    int loop_number = params.config.get<std::vector<int>>("perimeters").at(extruder_id) + surface.extra_perimeters - 1; // 0-indexed loops
+    int loop_number = params.perimeters(extruder_id) + surface.extra_perimeters - 1; // 0-indexed loops
     if (loop_number > 0 && ((params.config.get<Domain::TopOnePerimeterType>("top_one_perimeter_type") == Domain::TopOnePerimeterType::TopmostOnly && upper_slices == nullptr) || (params.config.get<bool>("only_one_perimeter_first_layer") && params.layer_id == 0)))
         loop_number = 0;
 
@@ -1177,7 +1177,7 @@ void PerimeterGenerator::process_arachne(
     if (lower_slices != nullptr
         && params.config.get<std::vector<bool>>("overhangs").at(extruder_id)
         && params.config.get<std::vector<bool>>("extra_perimeters_on_overhangs").at(extruder_id)
-        && params.config.get<std::vector<int>>("perimeters").at(extruder_id) > 0
+        && params.perimeters(extruder_id) > 0
         && params.layer_id > params.config.get<int>("raft_layers"))
     {
         // Generate extra perimeters on overhang areas, and cut them to these parts only, to save print time and material
@@ -1260,7 +1260,7 @@ void PerimeterGenerator::process_classic(
     // we need to process each island separately because we might have different
     // extra perimeters for each one
     // detect how many perimeters must be generated for this island
-    int        loop_number = params.config.get<std::vector<int>>("perimeters").at(extruder_id) + surface.extra_perimeters - 1;  // 0-indexed loops
+    int        loop_number = params.perimeters(extruder_id) + surface.extra_perimeters - 1;  // 0-indexed loops
 
     // Set the topmost layer to be one perimeter.
     if (loop_number > 0 && ((params.config.get<Domain::TopOnePerimeterType>("top_one_perimeter_type") != Domain::TopOnePerimeterType::None && upper_slices == nullptr) || (params.config.get<bool>("only_one_perimeter_first_layer") && params.layer_id == 0)))
@@ -1364,9 +1364,9 @@ void PerimeterGenerator::process_classic(
                 // Split the polygons with top/not_top.
 
                 // Get the offset from solid surface anchor.
-                const double total_perimeter_spacing      = double(perimeter_spacing * (params.config.get<std::vector<int>>("perimeters").at(extruder_id) - 1));
-                const double top_surface_offset_threshold = params.config.get<std::vector<int>>("perimeters").at(extruder_id) <= 1 ? 0. : 0.9 * total_perimeter_spacing;
-                double       top_surface_offset           = params.config.get<std::vector<int>>("perimeters").at(extruder_id) == 0 ? 0. : 1.5 * double(ext_perimeter_width + total_perimeter_spacing);
+                const double total_perimeter_spacing      = double(perimeter_spacing * (params.perimeters(extruder_id) - 1));
+                const double top_surface_offset_threshold = params.perimeters(extruder_id) <= 1 ? 0. : 0.9 * total_perimeter_spacing;
+                double       top_surface_offset           = params.perimeters(extruder_id) == 0 ? 0. : 1.5 * double(ext_perimeter_width + total_perimeter_spacing);
 
                 // If possible, try to not push the extra perimeters inside the sparse infill.
                 if (top_surface_offset > top_surface_offset_threshold) {
@@ -1581,7 +1581,7 @@ void PerimeterGenerator::process_classic(
     if (lower_slices != nullptr
         && params.config.get<std::vector<bool>>("overhangs").at(extruder_id)
         && params.config.get<std::vector<bool>>("extra_perimeters_on_overhangs").at(extruder_id)
-        && params.config.get<std::vector<int>>("perimeters").at(extruder_id) > 0
+        && params.perimeters(extruder_id) > 0
         && params.layer_id > params.config.get<int>("raft_layers"))
     {
         // Generate extra perimeters on overhang areas, and cut them to these parts only, to save print time and material

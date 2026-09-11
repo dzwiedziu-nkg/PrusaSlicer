@@ -33,6 +33,8 @@
 #include "libslic3r/Utils.hpp"
 #include "libslic3r/libslic3r.h"
 #include "libslic3r/LayerRegion.hpp"
+
+#include "libslic3r/PerimeterPlanner.hpp"
 #include "Slic3r/Biz/Algorithms/BoundingBox.hpp"
 
 using namespace Slic3r::Biz;
@@ -126,6 +128,32 @@ void LayerRegion::make_perimeters(
         perimeter_regions,
         spiral_vase
     );
+
+    // A plugin may want a different wall count here than the settings carry - one more on
+    // alternate layers, say, so the infill's anchors alternate between two radii and it ends
+    // up wedged between walls instead of always meeting the same seam. Asked before anything
+    // is generated from the count, and silent when no plugin is installed.
+    if (const PerimeterPlanner::Strategy &planner =
+            this->layer()->object()->print()->perimeter_planner; planner) {
+        if (const int perimeter_extruder = region_config.get<int>("perimeter_extruder") - 1;
+            perimeter_extruder >= 0) {
+            const Flow flow = this->flow(frPerimeter);
+            const PerimeterPlanner::RegionInfo info{
+                this->layer()->id(),
+                this->layer()->print_z,
+                this->layer()->height,
+                unsigned(perimeter_extruder),
+                region_config.get<std::vector<int>>("perimeters").at(perimeter_extruder),
+                flow.width(),
+                flow.spacing(),
+                flow.nozzle_diameter()
+            };
+            if (const std::optional<PerimeterPlanner::Plan> plan =
+                    PerimeterPlanner::plan_perimeters(planner, info); plan.has_value()) {
+                params.perimeters_override = plan->perimeters;
+            }
+        }
+    }
 
     // Cummulative sum of polygons over all the regions.
     const ExPolygons *lower_slices = this->layer()->lower_layer ? &this->layer()->lower_layer->lslices : nullptr;

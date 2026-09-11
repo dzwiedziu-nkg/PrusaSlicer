@@ -1259,6 +1259,8 @@ set(SLIC3R_SHARED_FILES
         src/Slic3r/App/Lua/ObjectLabelsPlugin.cpp
         include/Slic3r/App/Lua/PassPlannerPlugin.hpp
         src/Slic3r/App/Lua/PassPlannerPlugin.cpp
+        include/Slic3r/App/Lua/PerimeterPlannerPlugin.hpp
+        src/Slic3r/App/Lua/PerimeterPlannerPlugin.cpp
         include/Slic3r/App/Lua/ResumePlannerPlugin.hpp
         src/Slic3r/App/Lua/ResumePlannerPlugin.cpp
         include/Slic3r/App/Lua/PackageRegistry.hpp
@@ -1552,6 +1554,7 @@ if(SLIC3R_BUILD_TESTS)
             test/Slic3r/App/Lua/IslandSequencePluginTests.cpp
             test/Slic3r/App/Lua/ObjectLabelsPluginTests.cpp
             test/Slic3r/App/Lua/PassPlannerPluginTests.cpp
+            test/Slic3r/App/Lua/PerimeterPlannerPluginTests.cpp
             test/Slic3r/App/Lua/ResumePlannerPluginTests.cpp
 
             test/Slic3r/App/Scene/Node.cpp
