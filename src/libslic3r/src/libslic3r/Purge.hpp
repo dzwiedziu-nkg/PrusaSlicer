@@ -49,6 +49,14 @@ ExtrusionEntitiesPtr generate(
 /** @brief How much plastic a set of purge paths carries, in mm3. */
 double volume_of(const ExtrusionEntitiesPtr &paths);
 
+/**
+ * @brief How much room @p layer has to spare, in mm2.
+ *
+ * The same measurement generate() works from, offered on its own so that a caller can decide
+ * how much to ask for before asking for it.
+ */
+double spare_area(const Layer &layer, const Flow &flow);
+
 } // namespace Purge
 } // namespace Slic3r
 
