@@ -641,6 +641,13 @@ void PrintObject::apply_slice_plans()
     if (! planner || m_layers.empty())
         return;
 
+    // Merging the regions into layer outlines is the parallel stage's job and it has not run
+    // yet, so do it here. It is done again afterwards, on whatever this leaves behind.
+    for (Layer *layer : m_layers) {
+        m_print->throw_if_canceled();
+        layer->make_slices();
+    }
+
     const double object_height = m_layers.back()->print_z;
     std::vector<std::optional<SlicePlanner::Plan>> plans(m_layers.size());
     size_t to_clip = 0;
@@ -732,12 +739,6 @@ void PrintObject::slice()
     this->clear_layers();
     m_layers = new_layers(this, generate_object_layers(m_slicing_params, layer_height_profile));
     this->slice_volumes();
-    m_print->throw_if_canceled();
-    // A plugin may bound how far each layer reaches past the one below - chamfering the
-    // overhangs off, or carrying them on new material from underneath. Has to run here: the
-    // outlines are final, and nothing has yet been decided from them - surface types, infill
-    // regions and support all read the slices later.
-    this->apply_slice_plans();
     m_print->throw_if_canceled();
 #if 0
     // Layer::slicing_errors is no more set since 1.41.1 or possibly earlier, thus this code
@@ -1165,6 +1166,15 @@ void PrintObject::slice_volumes()
         InterlockingGenerator::generate_interlocking_structure(*this);
         m_print->throw_if_canceled();
     }
+
+    // A plugin may bound how far each layer reaches past the one below - chamfering the
+    // overhangs off, or carrying them on new material from underneath. It runs here, before
+    // size compensation, so that material it adds is compensated exactly like the model's own
+    // and the first layer keeps the arrangement the elephant foot compensation depends on.
+    // Nothing has been decided from the slices yet either: surface types, infill regions and
+    // support all read them later.
+    this->apply_slice_plans();
+    m_print->throw_if_canceled();
 
     SPDLOG_DEBUG("Slicing volumes - make_slices in parallel - begin");
     {
