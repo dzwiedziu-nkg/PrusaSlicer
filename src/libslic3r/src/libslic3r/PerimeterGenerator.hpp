@@ -1,6 +1,8 @@
 #ifndef slic3r_PerimeterGenerator_hpp_
 #define slic3r_PerimeterGenerator_hpp_
 
+#include <optional>
+
 #include <vector>
 
 #include "libslic3r/libslic3r.h"
@@ -78,6 +80,17 @@ struct Parameters {
     Flow                         solid_infill_flow;
     const PrintRegionConfigView     &config;
     const PerimeterRegions      &perimeter_regions;
+
+    // How many perimeters to generate here, when a PerimeterPlanner has said something other
+    // than what the settings carry. Empty is the ordinary case and reads the config.
+    std::optional<int>           perimeters_override;
+
+    /** @brief The wall count for @p extruder_id, whoever decided it. */
+    int perimeters(const int extruder_id) const
+    {
+        return perimeters_override.value_or(
+            config.get<std::vector<int>>("perimeters").at(extruder_id));
+    }
 
     // Derived parameters
     bool                         spiral_vase;

@@ -16,6 +16,7 @@
 #include "libslic3r/GCode/ObjectLabels.hpp"
 #include "libslic3r/IThumbnailImageGenerator.hpp"
 #include "libslic3r/PassPlanner.hpp"
+#include "libslic3r/PerimeterPlanner.hpp"
 #include "libslic3r/ResumePlanner.hpp"
 #include "libslic3r/PrintSteps.hpp"
 #include "libslic3r/SlicingStatus.hpp"
@@ -120,6 +121,14 @@ public:
      * does. See ResumePlanner - called from G-code generation, one layer at a time.
      */
     ResumePlanner::Strategy resume_planner;
+
+    /**
+     * Optionally decides how many perimeters a layer gets, instead of the one count the print
+     * settings carry for the whole object. Empty by default, which uses that count everywhere.
+     * See PerimeterPlanner - like the fill and pass planners, this one is called concurrently
+     * from several threads.
+     */
+    PerimeterPlanner::Strategy perimeter_planner;
 
     /**
      * Optionally schedules connected islands across layer boundaries. Empty by

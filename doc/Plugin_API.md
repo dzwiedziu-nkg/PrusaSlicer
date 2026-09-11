@@ -56,7 +56,8 @@ Here is an example of bundled plugin manifest:
 
 The recognized `required_apis` keys are `project.plugin`, `slicing.island_order`,
 `slicing.island_sequence`, `slicing.extrusion_filter`, `slicing.fill_planner` and
-`slicing.pass_planner` and `slicing.resume_planner`, all at version `1.0.0`.
+`slicing.pass_planner`, `slicing.perimeter_planner` and `slicing.resume_planner`, all at
+version `1.0.0`.
 
 This is list of recognized `manifest.json` fields. 
 
@@ -81,8 +82,8 @@ The table `info` describes plugin with following keys:
 - `id` (string) plugin unique identifier, recommended is reverse domain name like notation
 - `type` (string) type of plugin, allowed values are `'project.plugin'`,
   `'slicing.island_order'`, `'slicing.island_sequence'`, `'slicing.extrusion_filter'`,
-  `'slicing.fill_planner'`, `'slicing.pass_planner'`, `'slicing.resume_planner'` and
-  `'slicing.object_labels'`.
+  `'slicing.fill_planner'`, `'slicing.pass_planner'`, `'slicing.perimeter_planner'`,
+  `'slicing.resume_planner'` and `'slicing.object_labels'`.
 - `title` (string) displayed plugin name
 - `menu` (string) menu item path to register the plugin under _Plugins_ menu item (e.g. `Calibration/My cool pattern`).
   Only used by `project.plugin`.
@@ -379,6 +380,47 @@ serialized G-code stage, `plan_fill()` is reached from the slicer's parallel inf
 once per surface across all layers at once. Calls are serialized on the way into Lua, so a
 plugin does not have to be thread safe, but a plugin that answers for every surface of a
 large print will hold that stage up. Claim only the surfaces you can improve.
+
+### `slicing.perimeter_planner`
+
+Given a layer and the region about to have its perimeters generated, decide how many there
+will be.
+
+The wall count is a print setting, one number for the whole object, and that is the wrong shape
+for several things people want. The case that motivated the hook is OrcaSlicer's
+`alternate_extra_wall`: one extra wall on every other layer, so the innermost wall alternates
+between two radii and the infill ends up wedged vertically between walls rather than meeting
+one continuous face all the way up the part.
+
+```lua
+info = {
+    id = "alternate_extra_wall",
+    type = "slicing.perimeter_planner"
+}
+
+function plan_perimeters(region)
+    if region.layer_id % 2 == 1 then
+        return region.perimeters + 1
+    end
+    return nil                      -- use the count the settings ask for
+end
+```
+
+`region` carries `layer_id`, `print_z`, `layer_height`, `extruder_id`, `perimeters` - the count
+the settings ask for here - and `perimeter_width`, `perimeter_spacing` and `nozzle_diameter`.
+
+The answer is a wall count, or a table naming `perimeters`, or `nil` to leave the settings'
+count alone. Answering with the count it was handed is the same as declining. A count outside
+0 to 100 is clamped; the upper bound is not a physical limit but a guard, since a count that
+runs away fills the part with wall and takes the slice with it.
+
+Zero is allowed and means a layer with no wall, which the slicer already supports. A region the
+settings gave no wall at all is one the slicer is treating specially - spiral vase, or a
+surface that is all infill - and a plugin is better off leaving those alone.
+
+Called from the parallel stage that generates perimeters, so a strategy here is entered from
+several threads at once and must be thread safe - the Lua bridge serializes itself with a
+mutex, as the fill and pass planners do.
 
 ### `slicing.resume_planner`
 

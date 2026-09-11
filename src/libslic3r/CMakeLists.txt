@@ -295,6 +295,7 @@ set(SLIC3R_SOURCES
     src/libslic3r/NormalUtils.hpp
     src/libslic3r/PassPlanner.cpp
     src/libslic3r/PerimeterGenerator.cpp
+    src/libslic3r/PerimeterPlanner.cpp
     src/libslic3r/PerimeterGenerator.hpp
     src/libslic3r/Point.cpp
     src/libslic3r/Point.hpp
@@ -433,6 +434,7 @@ set(SLIC3R_PUBLIC_HEADERS
     include/libslic3r/IPrint.hpp
     include/libslic3r/InitPrint.hpp
     include/libslic3r/PassPlanner.hpp
+    include/libslic3r/PerimeterPlanner.hpp
     include/libslic3r/PrintSteps.hpp
     include/libslic3r/ResumePlanner.hpp
     include/libslic3r/SerializedConfig.hpp
