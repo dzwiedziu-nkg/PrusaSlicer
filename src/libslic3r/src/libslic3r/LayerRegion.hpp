@@ -84,6 +84,8 @@ public:
     // Unspecified fill polygons, used for overhang detection ("ensure vertical wall thickness feature")
     // and for re-starting of infills.
     [[nodiscard]] const ExPolygons&                 fill_expolygons() const { return m_fill_expolygons; }
+    /** @brief Perimeters a PerimeterPlanner added here beyond the settings' count. */
+    [[nodiscard]] unsigned                          planned_extra_perimeters() const { return m_planned_extra_perimeters; }
     // and their bounding boxes
     [[nodiscard]] const BoundingBoxes&              fill_expolygons_bboxes() const { return m_fill_expolygons_bboxes; }
     // Storage for fill regions produced for a single LayerIsland, of which infill splits into multiple islands.
@@ -177,6 +179,15 @@ public:
     SurfaceCollection           m_slices;
 
 private:
+    // How many perimeters a PerimeterPlanner added here beyond what the settings ask for.
+    //
+    // Kept because the vertical shell check reads the area left inside the innermost wall and
+    // treats whatever is outside it as shell that the layers above and below have to back up.
+    // A wall that is only on every other layer would otherwise have solid infill laid under it
+    // on the layers that do not have it - which is exactly the thing the extra wall was added
+    // to avoid, since it welds the alternation back into one continuous face.
+    unsigned                    m_planned_extra_perimeters{0};
+
     // Unspecified fill polygons, used for overhang detection ("ensure vertical wall thickness feature")
     // and for re-starting of infills.
     ExPolygons                  m_fill_expolygons;
