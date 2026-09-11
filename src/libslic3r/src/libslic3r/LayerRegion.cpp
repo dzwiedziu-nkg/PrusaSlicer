@@ -947,6 +947,17 @@ void LayerRegion::trim_surfaces(const Polygons &trimming_polygons)
 	m_slices.set(intersection_ex(this->slices().surfaces, trimming_polygons), stInternal);
 }
 
+void LayerRegion::add_surfaces(const ExPolygons &added)
+{
+#ifndef NDEBUG
+    for (const Surface &surface : this->slices())
+        assert(surface.surface_type == stInternal);
+#endif /* NDEBUG */
+    ExPolygons widened = to_expolygons(this->slices().surfaces);
+    Slic3r::append(widened, added);
+    m_slices.set(union_ex(widened), stInternal);
+}
+
 void LayerRegion::elephant_foot_compensation_step(const float elephant_foot_compensation_perimeter_step, const Polygons &trimming_polygons)
 {
 #ifndef NDEBUG
