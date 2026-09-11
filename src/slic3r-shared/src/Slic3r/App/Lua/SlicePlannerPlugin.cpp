@@ -136,6 +136,25 @@ public:
             }
             plan.max_overhang_width = width.as<double>();
         }
+
+        const sol::object remedy = answer["remedy"];
+        if (remedy.get_type() != sol::type::none && remedy.get_type() != sol::type::nil) {
+            if (remedy.get_type() != sol::type::string) {
+                disable("plan_slice() answered with a remedy that is not a string");
+                return std::nullopt;
+            }
+            const std::string name = remedy.as<std::string>();
+            if (name == "fill") {
+                plan.remedy = SlicePlanner::Remedy::Fill;
+            } else if (name != "clip") {
+                disable(fmt::format(
+                    "plan_slice() answered with a remedy of '{}', which is neither "
+                    "'clip' nor 'fill'",
+                    name
+                ));
+                return std::nullopt;
+            }
+        }
         ++m_bounded;
         return plan;
     }

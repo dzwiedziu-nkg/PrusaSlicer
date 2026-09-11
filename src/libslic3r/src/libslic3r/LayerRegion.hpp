@@ -137,6 +137,9 @@ public:
     double  infill_area_threshold() const;
     // Trim surfaces by trimming polygons. Used by the elephant foot compensation at the 1st layer.
     void    trim_surfaces(const Polygons &trimming_polygons);
+    // Widen the surfaces by material the mesh does not carry. Used by a slice planner asking
+    // for an overhang to be held up from below rather than cut off from above.
+    void    add_surfaces(const ExPolygons &added);
     // Single elephant foot compensation step, used by the elephant foor compensation at the 1st layer.
     // Trim surfaces by trimming polygons (shrunk by an elephant foot compensation step), but don't shrink narrow parts so much that no perimeter would fit.
     void    elephant_foot_compensation_step(const float elephant_foot_compensation_perimeter_step, const Polygons &trimming_polygons);

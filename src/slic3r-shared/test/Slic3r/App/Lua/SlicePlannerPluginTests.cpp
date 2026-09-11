@@ -140,6 +140,52 @@ TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a table without a growth a
     REQUIRE_FALSE(planner(layer()).has_value());
 }
 
+TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a remedy of fill asks for the other direction")
+{
+    const Strategy planner = planner_for(R"(
+        function plan_slice(layer)
+            return {max_overhang = 0.2856, remedy = "fill"}
+        end
+    )");
+    REQUIRE(static_cast<bool>(planner));
+
+    const auto planned = planner(layer());
+    REQUIRE(planned.has_value());
+    REQUIRE(planned->remedy == Slic3r::SlicePlanner::Remedy::Fill);
+}
+
+TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] clip is what an answer without a remedy means")
+{
+    // Including the bare-number answer, which predates the remedy existing.
+    const Strategy planner = planner_for(R"(
+        function plan_slice(layer)
+            if layer.layer_id % 2 == 0 then
+                return 0.3
+            end
+            return {max_overhang = 0.3, remedy = "clip"}
+        end
+    )");
+    REQUIRE(static_cast<bool>(planner));
+
+    const auto bare = planner(layer(4));
+    REQUIRE(bare.has_value());
+    REQUIRE(bare->remedy == Slic3r::SlicePlanner::Remedy::Clip);
+    const auto named = planner(layer(5));
+    REQUIRE(named.has_value());
+    REQUIRE(named->remedy == Slic3r::SlicePlanner::Remedy::Clip);
+}
+
+TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a remedy that is neither is refused")
+{
+    const Strategy planner = planner_for(R"(
+        function plan_slice(layer)
+            return {max_overhang = 0.3, remedy = "shrug"}
+        end
+    )");
+    REQUIRE(static_cast<bool>(planner));
+    REQUIRE_FALSE(planner(layer()).has_value());
+}
+
 TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a malformed answer is refused")
 {
     const Strategy planner = planner_for(R"(
