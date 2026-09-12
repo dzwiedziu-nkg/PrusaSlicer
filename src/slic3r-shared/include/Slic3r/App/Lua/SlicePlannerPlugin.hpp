@@ -10,7 +10,7 @@ namespace Slic3r::App::Lua {
 /**
  * @brief Version of the `slicing.slice_planner` plugin API implemented here.
  */
-constexpr auto SLICE_PLANNER_API_VERSION = "1.1.0";
+constexpr auto SLICE_PLANNER_API_VERSION = "1.2.0";
 
 /**
  * @brief Builds a slice planner from the installed slicing plugin.

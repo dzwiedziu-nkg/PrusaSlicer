@@ -47,8 +47,22 @@ struct SurfaceInfo
     /** @brief Height of the top of this layer, in mm. */
     double print_z;
     unsigned extruder_id;
-    /** @brief Distance between two adjacent fill lines, in mm. */
+    /**
+     * @brief Width of the bead the flow was worked out for, in mm.
+     *
+     * Not the distance between the stock pattern's lines: that is this divided by @c density,
+     * and on sparse infill the two are far apart. They coincide on a solid surface, which is
+     * where the first planner on this hook happened to work, so the two were confused for one
+     * another until a sparse pattern needed them apart.
+     */
     double spacing;
+    /**
+     * @brief How much of the surface the fill covers, 0 to 1.
+     *
+     * 1 on a solid, top or bridge surface; `fill_density` on sparse infill. A planner laying
+     * its own lines wants @c spacing/density between them to put down what the slicer meant.
+     */
+    double density;
     /** @brief Direction the slicer chose, in radians. Negative when not a bridge. */
     double bridge_angle;
 };

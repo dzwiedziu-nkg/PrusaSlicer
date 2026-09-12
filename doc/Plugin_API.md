@@ -339,7 +339,8 @@ function plan_fill(surface)
     --     layer_id     = <integer>,
     --     print_z      = <mm>,
     --     extruder_id  = <integer>,
-    --     spacing      = <mm>,       -- between two adjacent fill lines
+    --     spacing      = <mm>,       -- width of the bead the flow was worked out for
+    --     density      = <0..1>,     -- how much of the surface the fill covers
     --     bridge_angle = <radians>,  -- the direction the slicer chose, -1 if not a bridge
     --     contour      = {{x = <mm>, y = <mm>}, ...},              -- outer boundary
     --     holes        = {{{x = <mm>, y = <mm>}, ...}, ...}        -- inner boundaries
@@ -347,6 +348,12 @@ function plan_fill(surface)
     -- return a list of paths, {{{x, y}, ...}, ...}, or nil
 end
 ```
+
+**`spacing` is the width of the bead, not the gap between the stock pattern's lines.** The gap is
+`spacing / density`, and on sparse infill the two are far apart - at 15 % density they differ by
+nearly seven times. They coincide on a solid, top or bridge surface, where `density` is 1, which
+is where the first planner on this hook happened to work; a planner laying its own lines on
+sparse infill has to divide, or it will fill the part solid.
 
 Return `nil` to keep the paths the slicer generated; that is also what happens when the
 plugin raises or answers with something that is not a list of paths, so a broken plugin
@@ -487,12 +494,31 @@ the layer is handed back in full. Under `"fill"` it bounds the cone, and 0 - no 
 ordinary setting there, because the point is usually to carry an overhang of any size and a cone
 cannot run away in any case: it terminates where it meets the part or the bed.
 
+### Asking for both at once
+
+A layer may answer with a **list** of tables instead of one, and then it gets both passes:
+
+```lua
+function plan_slice(layer)
+    local reach = layer.layer_height / math.tan(math.rad(35))
+    return {
+        {max_overhang = reach, max_overhang_width = 2.0, remedy = "clip"},
+        {max_overhang = reach, max_overhang_width = 0.0, remedy = "fill"}
+    }
+end
+```
+
+That is how a plugin says *cut the small overhangs off and carry whatever is left*. The size
+bounds do the choosing: the clip is told to leave alone anything wider than 2 mm, so it takes
+only the small ledges on the way up, and the fill then carries what the clip left on the way
+down. At most one plan per remedy - two `"clip"` entries for the same layer is refused.
+
 Called once per layer during slicing, before anything is changed, so a plugin always sees the
-outlines the mesh gave. The answers are then applied as two passes, every `"clip"` layer bottom
-up and then every `"fill"` layer top down, because each layer is measured against the outline its
-neighbour was left with - which is what makes a run of them a slope rather than a staircase.
-Unlike the fill, pass and perimeter planners it is never entered concurrently, so a strategy here
-needs no lock of its own.
+outlines the mesh gave. The answers are then applied as two passes, every clip bottom up and
+then every fill top down, because each layer is measured against the outline its neighbour was
+left with - which is what makes a run of them a slope rather than a staircase. Unlike the fill,
+pass and perimeter planners it is never entered concurrently, so a strategy here needs no lock
+of its own.
 
 ### `slicing.resume_planner`
 

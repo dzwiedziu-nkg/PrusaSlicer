@@ -579,6 +579,7 @@ void Layer::make_fills(FillAdaptive::Octree* adaptive_fill_octree, FillAdaptive:
                     this->print_z,
                     params.extruder_id,
                     surface_fill.params.spacing,
+                    double(params.density),
                     surface_fill.params.bridge ? double(surface_fill.params.bridge_angle) : -1.
                 };
                 FillPlanner::Plan plan = FillPlanner::plan_fill(fill_planner, info, std::move(polylines));
