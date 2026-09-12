@@ -76,50 +76,14 @@ public:
         }
     }
 
-    std::optional<SlicePlanner::Plan> operator()(const LayerInfo& layer)
+    /** @brief Reads one answer table into a plan, and says which pass it is for. */
+    std::optional<SlicePlanner::Plan> to_plan(const sol::table& answer, bool& is_fill)
     {
-        if (m_disabled) {
-            return std::nullopt;
-        }
-        ++m_seen;
-
-        sol::state_view lua{m_lua.state()};
-        sol::table argument = lua.create_table(0, 7);
-        argument["layer_id"] = layer.layer_id;
-        argument["print_z"] = layer.print_z;
-        argument["slice_z"] = layer.slice_z;
-        argument["layer_height"] = layer.layer_height;
-        argument["object_height"] = layer.object_height;
-        argument["area"] = layer.area;
-        argument["islands"] = layer.islands;
-
-        const sol::protected_function_result result{m_plan_slice(argument)};
-        if (!result.valid()) {
-            const sol::error error = result;
-            disable(fmt::format("plan_slice() failed: {}", error.what()));
-            return std::nullopt;
-        }
-
-        const sol::object returned = result;
-        if (returned.get_type() == sol::type::nil) {
-            // The plugin was happy with the outline the mesh gave.
-            return std::nullopt;
-        }
-        // A bare number is the common answer and means how far the outline may grow.
-        if (returned.get_type() == sol::type::number) {
-            ++m_bounded;
-            return SlicePlanner::Plan{returned.as<double>()};
-        }
-        if (returned.get_type() != sol::type::table) {
-            disable("plan_slice() answered with neither a table, a number nor nil");
-            return std::nullopt;
-        }
-
-        const sol::table answer = returned.as<sol::table>();
+        is_fill = false;
         const sol::object growth = answer["max_overhang"];
         if (growth.get_type() == sol::type::none || growth.get_type() == sol::type::nil) {
-            // A table that says nothing about the growth asks for no bound. Clipping is
-            // destructive, so it happens only when a plugin asks for it in so many words.
+            // A table that says nothing about the growth asks for no bound. Rewriting the
+            // outline is destructive, so it happens only when a plugin asks in so many words.
             return std::nullopt;
         }
         if (growth.get_type() != sol::type::number) {
@@ -145,7 +109,7 @@ public:
             }
             const std::string name = remedy.as<std::string>();
             if (name == "fill") {
-                plan.remedy = SlicePlanner::Remedy::Fill;
+                is_fill = true;
             } else if (name != "clip") {
                 disable(fmt::format(
                     "plan_slice() answered with a remedy of '{}', which is neither "
@@ -155,8 +119,91 @@ public:
                 return std::nullopt;
             }
         }
-        ++m_bounded;
         return plan;
+    }
+
+    SlicePlanner::Plans operator()(const LayerInfo& layer)
+    {
+        if (m_disabled) {
+            return {};
+        }
+        ++m_seen;
+
+        sol::state_view lua{m_lua.state()};
+        sol::table argument = lua.create_table(0, 7);
+        argument["layer_id"] = layer.layer_id;
+        argument["print_z"] = layer.print_z;
+        argument["slice_z"] = layer.slice_z;
+        argument["layer_height"] = layer.layer_height;
+        argument["object_height"] = layer.object_height;
+        argument["area"] = layer.area;
+        argument["islands"] = layer.islands;
+
+        const sol::protected_function_result result{m_plan_slice(argument)};
+        if (!result.valid()) {
+            const sol::error error = result;
+            disable(fmt::format("plan_slice() failed: {}", error.what()));
+            return {};
+        }
+
+        const sol::object returned = result;
+        if (returned.get_type() == sol::type::nil) {
+            // The plugin was happy with the outline the mesh gave.
+            return {};
+        }
+        // A bare number is the common answer and means how far the outline may grow, clipped.
+        if (returned.get_type() == sol::type::number) {
+            ++m_bounded;
+            return SlicePlanner::Plans{SlicePlanner::Plan{returned.as<double>()}, std::nullopt};
+        }
+        if (returned.get_type() != sol::type::table) {
+            disable("plan_slice() answered with neither a table, a number nor nil");
+            return {};
+        }
+
+        const sol::table answer = returned.as<sol::table>();
+        SlicePlanner::Plans plans;
+        // A list of tables asks for one pass per entry, which is how a plugin says "cut the
+        // small overhangs off and carry what is left". A single table is the one-pass case.
+        if (answer[1].get_type() == sol::type::table) {
+            for (std::size_t i = 1; i <= answer.size(); ++i) {
+                const sol::object entry = answer[i];
+                if (entry.get_type() != sol::type::table) {
+                    disable("plan_slice() answered with a list holding something that is not a table");
+                    return {};
+                }
+                bool is_fill = false;
+                std::optional<SlicePlanner::Plan> plan =
+                    to_plan(entry.as<sol::table>(), is_fill);
+                if (m_disabled) {
+                    return {};
+                }
+                if (!plan.has_value()) {
+                    continue;
+                }
+                std::optional<SlicePlanner::Plan>& slot = is_fill ? plans.fill : plans.clip;
+                if (slot.has_value()) {
+                    disable(fmt::format(
+                        "plan_slice() answered with two '{}' plans for the same layer",
+                        is_fill ? "fill" : "clip"
+                    ));
+                    return {};
+                }
+                slot = plan;
+            }
+        } else {
+            bool is_fill = false;
+            std::optional<SlicePlanner::Plan> plan = to_plan(answer, is_fill);
+            if (m_disabled) {
+                return {};
+            }
+            (is_fill ? plans.fill : plans.clip) = plan;
+        }
+
+        if (!plans.empty()) {
+            ++m_bounded;
+        }
+        return plans;
     }
 
 private:

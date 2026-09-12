@@ -37,21 +37,19 @@ bool sane(double& value, const char* name, std::size_t layer_id)
 
 } // namespace
 
-std::optional<Plan> plan_slice(const Strategy& strategy, const LayerInfo& layer)
-{
-    if (!strategy) {
-        return std::nullopt;
-    }
+namespace {
 
-    std::optional<Plan> planned = strategy(layer);
+/** @brief Keeps a plan only if it asks for something the slicer can act on. */
+std::optional<Plan> checked(const std::optional<Plan>& planned, const LayerInfo& layer)
+{
     if (!planned.has_value()) {
         // The strategy was happy with the outline the mesh gave.
         return std::nullopt;
     }
     if (planned->max_overhang < 0.) {
-        // So is a strategy that answered without naming a bound. Saying so here keeps the
-        // slicer from taking the clipping path for no reason. A NaN is not caught by this
-        // comparison and falls through to sane() below, which rejects it.
+        // So is a plan that names no bound. Saying so here keeps the slicer from walking a
+        // pass for no reason. A NaN is not caught by this comparison and falls through to
+        // sane() below, which rejects it.
         return std::nullopt;
     }
 
@@ -61,6 +59,18 @@ std::optional<Plan> plan_slice(const Strategy& strategy, const LayerInfo& layer)
         return std::nullopt;
     }
     return plan;
+}
+
+} // namespace
+
+Plans plan_slice(const Strategy& strategy, const LayerInfo& layer)
+{
+    if (!strategy) {
+        return Plans{};
+    }
+
+    const Plans planned = strategy(layer);
+    return Plans{checked(planned.clip, layer), checked(planned.fill, layer)};
 }
 
 } // namespace Slic3r::SlicePlanner

@@ -142,12 +142,13 @@ public:
         ++m_seen;
 
         sol::state_view lua{m_lua.state()};
-        sol::table argument = lua.create_table(0, 8);
+        sol::table argument = lua.create_table(0, 9);
         argument["role"] = role_name(surface.role);
         argument["layer_id"] = surface.layer_id;
         argument["print_z"] = surface.print_z;
         argument["extruder_id"] = surface.extruder_id;
         argument["spacing"] = surface.spacing;
+        argument["density"] = surface.density;
         argument["bridge_angle"] = surface.bridge_angle;
         argument["contour"] = contour_to_lua(lua, surface.region.contour);
 
