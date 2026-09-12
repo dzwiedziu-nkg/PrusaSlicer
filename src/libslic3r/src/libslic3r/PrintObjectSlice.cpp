@@ -649,7 +649,7 @@ void PrintObject::apply_slice_plans()
     }
 
     const double object_height = m_layers.back()->print_z;
-    std::vector<std::optional<SlicePlanner::Plan>> plans(m_layers.size());
+    std::vector<SlicePlanner::Plans> plans(m_layers.size());
     size_t to_clip = 0;
     size_t to_fill = 0;
     for (size_t layer_id = 0; layer_id < m_layers.size(); ++ layer_id) {
@@ -661,8 +661,10 @@ void PrintObject::apply_slice_plans()
         plans[layer_id] = SlicePlanner::plan_slice(planner,
             SlicePlanner::LayerInfo{ layer_id, layer.print_z, layer.slice_z, layer.height,
                 object_height, unscaled<double>(unscaled<double>(area)), layer.lslices.size() });
-        if (plans[layer_id].has_value())
-            ++ (plans[layer_id]->remedy == SlicePlanner::Remedy::Fill ? to_fill : to_clip);
+        if (plans[layer_id].clip.has_value())
+            ++ to_clip;
+        if (plans[layer_id].fill.has_value())
+            ++ to_fill;
     }
     if (to_clip == 0 && to_fill == 0)
         return;
@@ -676,8 +678,8 @@ void PrintObject::apply_slice_plans()
         for (size_t layer_id = 1; layer_id < m_layers.size(); ++ layer_id) {
             m_print->throw_if_canceled();
             Layer &layer = *m_layers[layer_id];
-            const std::optional<SlicePlanner::Plan> &plan = plans[layer_id];
-            if (plan.has_value() && plan->remedy == SlicePlanner::Remedy::Clip) {
+            const std::optional<SlicePlanner::Plan> &plan = plans[layer_id].clip;
+            if (plan.has_value()) {
                 const ExPolygons reach = plan->max_overhang > 0. ?
                     offset_ex(below, scaled<float>(plan->max_overhang)) : below;
                 if (std::optional<ExPolygons> kept = clip_to_reach(layer.lslices, reach, *plan)) {
@@ -699,8 +701,8 @@ void PrintObject::apply_slice_plans()
         for (size_t layer_id = m_layers.size() - 1; layer_id-- > 0; ) {
             m_print->throw_if_canceled();
             Layer &layer = *m_layers[layer_id];
-            const std::optional<SlicePlanner::Plan> &plan = plans[layer_id];
-            if (! plan.has_value() || plan->remedy != SlicePlanner::Remedy::Fill)
+            const std::optional<SlicePlanner::Plan> &plan = plans[layer_id].fill;
+            if (! plan.has_value())
                 continue;
             const Layer &above = *m_layers[layer_id + 1];
             const float  reach = scaled<float>(plan->max_overhang);

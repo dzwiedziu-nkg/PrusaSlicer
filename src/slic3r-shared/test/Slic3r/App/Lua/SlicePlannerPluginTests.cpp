@@ -12,6 +12,7 @@
 using Slic3r::App::Lua::make_slice_planner;
 using Slic3r::SlicePlanner::LayerInfo;
 using Slic3r::SlicePlanner::Plan;
+using Slic3r::SlicePlanner::Plans;
 using Slic3r::SlicePlanner::Strategy;
 
 namespace {
@@ -70,10 +71,10 @@ TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a bare number is the growt
     REQUIRE(static_cast<bool>(planner));
 
     const auto planned = planner(layer());
-    REQUIRE(planned.has_value());
-    REQUIRE(planned->max_overhang == 0.3);
+    REQUIRE(planned.clip.has_value());
+    REQUIRE(planned.clip->max_overhang == 0.3);
     // Nothing said about the removal width means no limit on it.
-    REQUIRE(planned->max_overhang_width == 0.);
+    REQUIRE(planned.clip->max_overhang_width == 0.);
 }
 
 TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a table may name both distances")
@@ -86,9 +87,9 @@ TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a table may name both dist
     REQUIRE(static_cast<bool>(planner));
 
     const auto planned = planner(layer());
-    REQUIRE(planned.has_value());
-    REQUIRE(planned->max_overhang == 0.25);
-    REQUIRE(planned->max_overhang_width == 2.0);
+    REQUIRE(planned.clip.has_value());
+    REQUIRE(planned.clip->max_overhang == 0.25);
+    REQUIRE(planned.clip->max_overhang_width == 2.0);
 }
 
 TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] the layer reaches the plugin")
@@ -105,15 +106,15 @@ TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] the layer reaches the plug
     )");
     REQUIRE(static_cast<bool>(planner));
 
-    REQUIRE_FALSE(planner(layer(0)).has_value());
+    REQUIRE(planner(layer(0)).empty());
     const auto high = planner(layer(20));
-    REQUIRE(high.has_value());
-    REQUIRE(std::abs(high->max_overhang - 0.2856) < 1e-4);
+    REQUIRE(high.clip.has_value());
+    REQUIRE(std::abs(high.clip->max_overhang - 0.2856) < 1e-4);
 
     // And a thicker layer of the same object gets a proportionally wider allowance.
     const auto thick = planner(layer(20, 0.3));
-    REQUIRE(thick.has_value());
-    REQUIRE(std::abs(thick->max_overhang - 0.4284) < 1e-4);
+    REQUIRE(thick.clip.has_value());
+    REQUIRE(std::abs(thick.clip->max_overhang - 0.4284) < 1e-4);
 }
 
 TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] declining prints the mesh's outline")
@@ -124,7 +125,7 @@ TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] declining prints the mesh'
         end
     )");
     REQUIRE(static_cast<bool>(planner));
-    REQUIRE_FALSE(planner(layer()).has_value());
+    REQUIRE(planner(layer()).empty());
 }
 
 TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a table without a growth asks for nothing")
@@ -137,7 +138,7 @@ TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a table without a growth a
         end
     )");
     REQUIRE(static_cast<bool>(planner));
-    REQUIRE_FALSE(planner(layer()).has_value());
+    REQUIRE(planner(layer()).empty());
 }
 
 TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a remedy of fill asks for the other direction")
@@ -150,8 +151,8 @@ TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a remedy of fill asks for 
     REQUIRE(static_cast<bool>(planner));
 
     const auto planned = planner(layer());
-    REQUIRE(planned.has_value());
-    REQUIRE(planned->remedy == Slic3r::SlicePlanner::Remedy::Fill);
+    REQUIRE(planned.fill.has_value());
+    REQUIRE_FALSE(planned.clip.has_value());
 }
 
 TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] clip is what an answer without a remedy means")
@@ -168,11 +169,45 @@ TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] clip is what an answer wit
     REQUIRE(static_cast<bool>(planner));
 
     const auto bare = planner(layer(4));
-    REQUIRE(bare.has_value());
-    REQUIRE(bare->remedy == Slic3r::SlicePlanner::Remedy::Clip);
+    REQUIRE(bare.clip.has_value());
+    REQUIRE_FALSE(bare.fill.has_value());
     const auto named = planner(layer(5));
-    REQUIRE(named.has_value());
-    REQUIRE(named->remedy == Slic3r::SlicePlanner::Remedy::Clip);
+    REQUIRE(named.clip.has_value());
+    REQUIRE_FALSE(named.fill.has_value());
+}
+
+TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a list asks for both passes at once")
+{
+    // Cut the small overhangs off on the way up, carry what that bound left on the way down.
+    const Strategy planner = planner_for(R"(
+        function plan_slice(layer)
+            return {
+                {max_overhang = 0.2856, max_overhang_width = 2.0, remedy = "clip"},
+                {max_overhang = 0.2856, max_overhang_width = 0.0, remedy = "fill"}
+            }
+        end
+    )");
+    REQUIRE(static_cast<bool>(planner));
+
+    const auto planned = planner(layer());
+    REQUIRE(planned.clip.has_value());
+    REQUIRE(planned.fill.has_value());
+    REQUIRE(planned.clip->max_overhang_width == 2.0);
+    REQUIRE(planned.fill->max_overhang_width == 0.0);
+}
+
+TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] two plans for the same pass are refused")
+{
+    const Strategy planner = planner_for(R"(
+        function plan_slice(layer)
+            return {
+                {max_overhang = 0.2, remedy = "clip"},
+                {max_overhang = 0.3, remedy = "clip"}
+            }
+        end
+    )");
+    REQUIRE(static_cast<bool>(planner));
+    REQUIRE(planner(layer()).empty());
 }
 
 TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a remedy that is neither is refused")
@@ -183,7 +218,7 @@ TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a remedy that is neither i
         end
     )");
     REQUIRE(static_cast<bool>(planner));
-    REQUIRE_FALSE(planner(layer()).has_value());
+    REQUIRE(planner(layer()).empty());
 }
 
 TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a malformed answer is refused")
@@ -194,7 +229,7 @@ TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a malformed answer is refu
         end
     )");
     REQUIRE(static_cast<bool>(planner));
-    REQUIRE_FALSE(planner(layer()).has_value());
+    REQUIRE(planner(layer()).empty());
 }
 
 TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a failing plugin declines every layer")
@@ -205,8 +240,8 @@ TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a failing plugin declines 
         end
     )");
     REQUIRE(static_cast<bool>(planner));
-    REQUIRE_FALSE(planner(layer()).has_value());
-    REQUIRE_FALSE(planner(layer()).has_value());
+    REQUIRE(planner(layer()).empty());
+    REQUIRE(planner(layer()).empty());
 }
 
 TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a plugin without plan_slice is not loaded")
@@ -216,43 +251,43 @@ TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a plugin without plan_slic
 
 TEST_CASE("[SlicePlanner] no strategy prints the mesh's outline")
 {
-    REQUIRE_FALSE(Slic3r::SlicePlanner::plan_slice({}, layer()).has_value());
+    REQUIRE(Slic3r::SlicePlanner::plan_slice({}, layer()).empty());
 }
 
 TEST_CASE("[SlicePlanner] an unbounded growth is a decline, zero is not")
 {
     using Slic3r::SlicePlanner::UNBOUNDED;
 
-    const Strategy unbounded = [](const LayerInfo&) { return Plan{}; };
+    const Strategy unbounded = [](const LayerInfo&) { return Plans{Plan{}, std::nullopt}; };
     REQUIRE(Plan{}.max_overhang == UNBOUNDED);
-    REQUIRE_FALSE(Slic3r::SlicePlanner::plan_slice(unbounded, layer()).has_value());
+    REQUIRE(Slic3r::SlicePlanner::plan_slice(unbounded, layer()).empty());
 
     // Zero is a real answer and a very different one: the outline may not widen at all.
-    const Strategy vertical = [](const LayerInfo&) { return Plan{0., 2.}; };
+    const Strategy vertical = [](const LayerInfo&) { return Plans{Plan{0., 2.}, std::nullopt}; };
     const auto planned = Slic3r::SlicePlanner::plan_slice(vertical, layer());
-    REQUIRE(planned.has_value());
-    REQUIRE(planned->max_overhang == 0.);
+    REQUIRE(planned.clip.has_value());
+    REQUIRE(planned.clip->max_overhang == 0.);
 }
 
 TEST_CASE("[SlicePlanner] a runaway distance is clamped and a nonsense one refused")
 {
     using Slic3r::SlicePlanner::MAX_DISTANCE;
 
-    const Strategy runaway = [](const LayerInfo&) { return Plan{1e9, 1e9}; };
+    const Strategy runaway = [](const LayerInfo&) { return Plans{Plan{1e9, 1e9}, std::nullopt}; };
     const auto clamped = Slic3r::SlicePlanner::plan_slice(runaway, layer());
-    REQUIRE(clamped.has_value());
-    REQUIRE(clamped->max_overhang == MAX_DISTANCE);
-    REQUIRE(clamped->max_overhang_width == MAX_DISTANCE);
+    REQUIRE(clamped.clip.has_value());
+    REQUIRE(clamped.clip->max_overhang == MAX_DISTANCE);
+    REQUIRE(clamped.clip->max_overhang_width == MAX_DISTANCE);
 
     // A negative removal width is meant as "no limit", which is what zero says.
-    const Strategy backwards = [](const LayerInfo&) { return Plan{0.3, -1.}; };
+    const Strategy backwards = [](const LayerInfo&) { return Plans{Plan{0.3, -1.}, std::nullopt}; };
     const auto floored = Slic3r::SlicePlanner::plan_slice(backwards, layer());
-    REQUIRE(floored.has_value());
-    REQUIRE(floored->max_overhang_width == 0.);
+    REQUIRE(floored.clip.has_value());
+    REQUIRE(floored.clip->max_overhang_width == 0.);
 
     // A NaN is not caught by the unbounded test, so it has to be caught here.
     const Strategy nonsense = [](const LayerInfo&) {
-        return Plan{std::numeric_limits<double>::quiet_NaN(), 2.};
+        return Plans{Plan{std::numeric_limits<double>::quiet_NaN(), 2.}, std::nullopt};
     };
-    REQUIRE_FALSE(Slic3r::SlicePlanner::plan_slice(nonsense, layer()).has_value());
+    REQUIRE(Slic3r::SlicePlanner::plan_slice(nonsense, layer()).empty());
 }

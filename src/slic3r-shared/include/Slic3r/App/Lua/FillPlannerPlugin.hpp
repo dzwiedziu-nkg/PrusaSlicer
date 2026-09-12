@@ -10,7 +10,7 @@ namespace Slic3r::App::Lua {
 /**
  * @brief Version of the `slicing.fill_planner` plugin API implemented here.
  */
-constexpr auto FILL_PLANNER_API_VERSION = "1.1.0";
+constexpr auto FILL_PLANNER_API_VERSION = "1.2.0";
 
 /**
  * @brief Builds a fill planner from the installed slicing plugin.
