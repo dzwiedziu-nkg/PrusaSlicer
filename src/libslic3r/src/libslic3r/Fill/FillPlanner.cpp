@@ -69,7 +69,18 @@ Plan plan_fill(const Strategy& strategy, const SurfaceInfo& surface, Domain::Pol
         );
         flow_ratio = std::isfinite(flow_ratio) ? std::clamp(flow_ratio, MIN_FLOW_RATIO, MAX_FLOW_RATIO) : 1.;
     }
-    return Plan{std::move(clipped), flow_ratio};
+    double speed = planned->speed;
+    if (speed != 0.) {
+        if (!std::isfinite(speed) || speed < MIN_SPEED || speed > MAX_SPEED) {
+            SPDLOG_WARN(
+                "Fill planner asked for {} mm/s on layer {}, which is outside {}..{}; "
+                "using the speed the role asks for",
+                speed, surface.layer_id, MIN_SPEED, MAX_SPEED
+            );
+            speed = 0.;
+        }
+    }
+    return Plan{std::move(clipped), flow_ratio, speed};
 }
 
 } // namespace Slic3r::FillPlanner

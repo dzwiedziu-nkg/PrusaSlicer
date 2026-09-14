@@ -142,13 +142,15 @@ public:
         ++m_seen;
 
         sol::state_view lua{m_lua.state()};
-        sol::table argument = lua.create_table(0, 9);
+        sol::table argument = lua.create_table(0, 11);
         argument["role"] = role_name(surface.role);
         argument["layer_id"] = surface.layer_id;
         argument["print_z"] = surface.print_z;
         argument["extruder_id"] = surface.extruder_id;
         argument["spacing"] = surface.spacing;
         argument["density"] = surface.density;
+        argument["mm3_per_mm"] = surface.mm3_per_mm;
+        argument["external"] = surface.external;
         argument["bridge_angle"] = surface.bridge_angle;
         argument["contour"] = contour_to_lua(lua, surface.region.contour);
 
@@ -213,14 +215,24 @@ private:
             return std::nullopt;
         }
 
+        double flow_ratio = 1.;
         const sol::object ratio = answer["flow_ratio"];
-        if (ratio.get_type() == sol::type::none || ratio.get_type() == sol::type::nil) {
-            return FillPlanner::Plan{std::move(*paths)};
+        if (ratio.get_type() != sol::type::none && ratio.get_type() != sol::type::nil) {
+            if (ratio.get_type() != sol::type::number) {
+                return std::nullopt;
+            }
+            flow_ratio = ratio.as<double>();
         }
-        if (ratio.get_type() != sol::type::number) {
-            return std::nullopt;
+
+        double speed = 0.;
+        const sol::object wanted = answer["speed"];
+        if (wanted.get_type() != sol::type::none && wanted.get_type() != sol::type::nil) {
+            if (wanted.get_type() != sol::type::number) {
+                return std::nullopt;
+            }
+            speed = wanted.as<double>();
         }
-        return FillPlanner::Plan{std::move(*paths), ratio.as<double>()};
+        return FillPlanner::Plan{std::move(*paths), flow_ratio, speed};
     }
 
     /** @brief Converts a list of paths, or nothing when it is not shaped like one. */
