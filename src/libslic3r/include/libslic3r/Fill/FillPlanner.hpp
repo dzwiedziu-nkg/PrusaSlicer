@@ -63,6 +63,27 @@ struct SurfaceInfo
      * its own lines wants @c spacing/density between them to put down what the slicer meant.
      */
     double density;
+    /**
+     * @brief Volume the flow puts down per mm of path, in mm^3.
+     *
+     * The only honest source for how wide the bead actually comes out. On a bridge it is the
+     * area of a circle, so the strand is @c sqrt(4*mm3_per_mm/pi) across and that is what a
+     * planner has to space by if it wants the strands to touch; everywhere else it is a
+     * rounded rectangle of @c spacing and the layer height. Not derivable from @c spacing: the
+     * slicer adjusts the line spacing to fit a whole number of lines across the region, so the
+     * same bead comes with different spacings on different parts of the same layer.
+     */
+    double mm3_per_mm;
+    /**
+     * @brief Whether this surface is a face of the object rather than buried inside it.
+     *
+     * The slicer has one extrusion role for both kinds of bridge and one @c bridge_speed for
+     * both, so a planner cannot tell them apart from the role: a bridge over open air and a
+     * bridge over sparse infill both arrive as @c BridgeInfill. This is what separates them -
+     * true for the one cast in mid-air, false for the one with a lattice under it. They are
+     * not the same problem and rarely want the same answer.
+     */
+    bool external;
     /** @brief Direction the slicer chose, in radians. Negative when not a bridge. */
     double bridge_angle;
 };
@@ -70,6 +91,10 @@ struct SurfaceInfo
 /** @brief How far from the slicer's own flow a strategy is allowed to ask to go. */
 constexpr double MIN_FLOW_RATIO = 0.05;
 constexpr double MAX_FLOW_RATIO = 5.;
+
+/** @brief Bounds on a planned speed, in mm/s. Guards rather than physical limits. */
+constexpr double MIN_SPEED = 1.;
+constexpr double MAX_SPEED = 1000.;
 
 /** @brief How one surface is to be filled. */
 struct Plan
@@ -87,6 +112,16 @@ struct Plan
      * anything outside MIN_FLOW_RATIO..MAX_FLOW_RATIO is clamped into it.
      */
     double flow_ratio{1.};
+    /**
+     * @brief Print speed for these paths in mm/s, or 0 to keep the one the role would pick.
+     *
+     * The slicer has one speed per extrusion role, and that is too coarse for some of what a
+     * planner can do: both kinds of bridge are @c BridgeInfill and share @c bridge_speed, but
+     * one is cast over open air and the other is laid on a lattice, and they do not want the
+     * same speed. Clamped to MIN_SPEED..MAX_SPEED; a speed outside that is a mistake rather
+     * than a decision.
+     */
+    double speed{0.};
 };
 
 /**

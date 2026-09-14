@@ -3995,6 +3995,12 @@ std::string GCodeGenerator::_extrude(
                                         .at(extruder_id)
                                         .get_abs_value(infill_speed);
     // set speed
+    if (speed == -1 && path_attr.planned_speed.has_value()) {
+        // A fill planner named one for these paths. The slicer has a single speed per role and
+        // that is too coarse for some of what a planner does - both kinds of bridge are
+        // BridgeInfill and share bridge_speed, and they do not want the same speed.
+        speed = *path_attr.planned_speed;
+    }
     if (speed == -1) {
         if (path_attr.role == ExtrusionRole::Perimeter) {
             speed = perimeter_speed;

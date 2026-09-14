@@ -163,12 +163,18 @@ struct ExtrusionAttributes : ExtrusionFlow
     std::optional<OverhangAttributes> overhang_attributes;
     // Set only for external and internal perimeters. The external perimeter has value 0, the first internal perimeter has 1, and so on.
     std::optional<uint16_t> perimeter_index;
+    // Print speed in mm/s asked for by a plugin, overriding the one the role would pick.
+    // The slicer has one speed per role, and some of the things a planner does need a
+    // different one for part of a role - a bridge cast over open air wants to be slower than
+    // the same role laid over infill, and the two are one role here.
+    std::optional<float> planned_speed;
 };
 
 inline bool operator==(const ExtrusionAttributes &lhs, const ExtrusionAttributes &rhs)
 {
     return static_cast<const ExtrusionFlow&>(lhs) == static_cast<const ExtrusionFlow&>(rhs) &&
-           lhs.role == rhs.role && lhs.overhang_attributes == rhs.overhang_attributes;
+           lhs.role == rhs.role && lhs.overhang_attributes == rhs.overhang_attributes &&
+           lhs.planned_speed == rhs.planned_speed;
 }
 
 class ExtrusionPath : public ExtrusionEntity

@@ -569,6 +569,8 @@ void Layer::make_fills(FillAdaptive::Octree* adaptive_fill_octree, FillAdaptive:
             // How much the planner asked the flow to be scaled by; 1 unless one is
             // installed and claimed this surface.
             double planned_flow_ratio = 1.;
+            // Speed a planner asked for, 0 unless one is installed and named one.
+            double planned_speed = 0.;
             // Arachne fills carry a width per point, which the planner contract cannot
             // express, so those are left to the stock pattern.
             if (fill_planner && !params.use_arachne) {
@@ -580,11 +582,14 @@ void Layer::make_fills(FillAdaptive::Octree* adaptive_fill_octree, FillAdaptive:
                     params.extruder_id,
                     surface_fill.params.spacing,
                     double(params.density),
+                    surface_fill.params.flow.mm3_per_mm(),
+                    surface_fill.surface.is_external(),
                     surface_fill.params.bridge ? double(surface_fill.params.bridge_angle) : -1.
                 };
                 FillPlanner::Plan plan = FillPlanner::plan_fill(fill_planner, info, std::move(polylines));
                 polylines             = std::move(plan.paths);
                 planned_flow_ratio    = plan.flow_ratio;
+                planned_speed         = plan.speed;
             }
             if (!polylines.empty() || !thick_polylines.empty()) {
                 // calculate actual flow from spacing (which might have been adjusted by the infill
@@ -637,13 +642,16 @@ void Layer::make_fills(FillAdaptive::Octree* adaptive_fill_octree, FillAdaptive:
                     thick_polylines.clear();
                 } else {
                     // When prefer_clockwise_movements is true, we have to ensure that extrusion paths will not be reversed during path planning.
+                    ExtrusionAttributes fill_attributes{
+                        surface_fill.params.extrusion_role,
+                        ExtrusionFlow{ flow_mm3_per_mm, float(flow_width), surface_fill.params.flow.height() },
+                        f->is_self_crossing()
+                    };
+                    if (planned_speed > 0.)
+                        fill_attributes.planned_speed = float(planned_speed);
                     extrusion_entities_append_paths(
-                        eec->entities, std::move(polylines),
-						ExtrusionAttributes{
-                            surface_fill.params.extrusion_role,
-							ExtrusionFlow{ flow_mm3_per_mm, float(flow_width), surface_fill.params.flow.height() },
-                            f->is_self_crossing()
-						}, !params.prefer_clockwise_movements);
+                        eec->entities, std::move(polylines), fill_attributes,
+                        !params.prefer_clockwise_movements);
                     layerm.m_fills.entities.push_back(eec);
                 }
                 insert_fills_into_islands(*this, uint32_t(surface_fill.region_id), fill_begin, uint32_t(layerm.fills().size()));
