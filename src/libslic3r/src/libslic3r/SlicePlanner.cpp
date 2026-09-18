@@ -70,7 +70,10 @@ Plans plan_slice(const Strategy& strategy, const LayerInfo& layer)
     }
 
     const Plans planned = strategy(layer);
-    return Plans{checked(planned.clip, layer), checked(planned.fill, layer)};
+    return Plans{
+        checked(planned.clip, layer),
+        checked(planned.fill, layer),
+        checked(planned.cap, layer)};
 }
 
 } // namespace Slic3r::SlicePlanner

@@ -76,10 +76,37 @@ public:
         }
     }
 
-    /** @brief Reads one answer table into a plan, and says which pass it is for. */
-    std::optional<SlicePlanner::Plan> to_plan(const sol::table& answer, bool& is_fill)
+    /** @brief Which pass an answer is for. */
+    enum class Remedy
     {
-        is_fill = false;
+        Clip,
+        Fill,
+        Cap
+    };
+
+    static const char* name_of(const Remedy remedy)
+    {
+        switch (remedy) {
+        case Remedy::Fill: return "fill";
+        case Remedy::Cap: return "cap";
+        default: return "clip";
+        }
+    }
+
+    /** @brief The slot a remedy's plan belongs in. */
+    static std::optional<SlicePlanner::Plan>& slot_of(SlicePlanner::Plans& plans, const Remedy remedy)
+    {
+        switch (remedy) {
+        case Remedy::Fill: return plans.fill;
+        case Remedy::Cap: return plans.cap;
+        default: return plans.clip;
+        }
+    }
+
+    /** @brief Reads one answer table into a plan, and says which pass it is for. */
+    std::optional<SlicePlanner::Plan> to_plan(const sol::table& answer, Remedy& remedy_out)
+    {
+        remedy_out = Remedy::Clip;
         const sol::object growth = answer["max_overhang"];
         if (growth.get_type() == sol::type::none || growth.get_type() == sol::type::nil) {
             // A table that says nothing about the growth asks for no bound. Rewriting the
@@ -109,11 +136,13 @@ public:
             }
             const std::string name = remedy.as<std::string>();
             if (name == "fill") {
-                is_fill = true;
+                remedy_out = Remedy::Fill;
+            } else if (name == "cap") {
+                remedy_out = Remedy::Cap;
             } else if (name != "clip") {
                 disable(fmt::format(
-                    "plan_slice() answered with a remedy of '{}', which is neither "
-                    "'clip' nor 'fill'",
+                    "plan_slice() answered with a remedy of '{}', which is none of "
+                    "'clip', 'fill' and 'cap'",
                     name
                 ));
                 return std::nullopt;
@@ -154,7 +183,7 @@ public:
         // A bare number is the common answer and means how far the outline may grow, clipped.
         if (returned.get_type() == sol::type::number) {
             ++m_bounded;
-            return SlicePlanner::Plans{SlicePlanner::Plan{returned.as<double>()}, std::nullopt};
+            return SlicePlanner::Plans{SlicePlanner::Plan{returned.as<double>()}, std::nullopt, std::nullopt};
         }
         if (returned.get_type() != sol::type::table) {
             disable("plan_slice() answered with neither a table, a number nor nil");
@@ -172,32 +201,32 @@ public:
                     disable("plan_slice() answered with a list holding something that is not a table");
                     return {};
                 }
-                bool is_fill = false;
+                Remedy remedy = Remedy::Clip;
                 std::optional<SlicePlanner::Plan> plan =
-                    to_plan(entry.as<sol::table>(), is_fill);
+                    to_plan(entry.as<sol::table>(), remedy);
                 if (m_disabled) {
                     return {};
                 }
                 if (!plan.has_value()) {
                     continue;
                 }
-                std::optional<SlicePlanner::Plan>& slot = is_fill ? plans.fill : plans.clip;
+                std::optional<SlicePlanner::Plan>& slot = slot_of(plans, remedy);
                 if (slot.has_value()) {
                     disable(fmt::format(
                         "plan_slice() answered with two '{}' plans for the same layer",
-                        is_fill ? "fill" : "clip"
+                        name_of(remedy)
                     ));
                     return {};
                 }
                 slot = plan;
             }
         } else {
-            bool is_fill = false;
-            std::optional<SlicePlanner::Plan> plan = to_plan(answer, is_fill);
+            Remedy remedy = Remedy::Clip;
+            std::optional<SlicePlanner::Plan> plan = to_plan(answer, remedy);
             if (m_disabled) {
                 return {};
             }
-            (is_fill ? plans.fill : plans.clip) = plan;
+            slot_of(plans, remedy) = plan;
         }
 
         if (!plans.empty()) {

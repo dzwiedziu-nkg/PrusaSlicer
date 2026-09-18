@@ -18,7 +18,7 @@
  * at most @c layer_height/tan(theta) outside the one below it, and a run of layers held to
  * that is a slope of exactly that angle.
  *
- * There are two ways to hold them to it, and the plugin picks per layer:
+ * There are three ways to hold them to it, and the plugin picks per layer:
  *
  *  - The **clip** takes the offending material off the upper layer, walking upward. The
  *    overhang is chamfered away and the part comes out a little smaller.
@@ -26,8 +26,13 @@
  *    carried on a cone of new material down to whatever holds it up. The part comes out
  *    larger and nothing of the mesh is lost. This is what OrcaSlicer calls
  *    @c make_overhang_printable.
+ *  - The **cap** closes the opening the overhang hangs over, on that one layer, so the
+ *    overhang is bridged from both sides instead of being walled in mid-air. The layer above
+ *    keeps its hole, because the layer below it is now solid there. This is what OrcaSlicer
+ *    calls a sacrificial layer for a counterbore hole, and the material has to be drilled out
+ *    afterwards - which is why it is the one remedy that needs asking for by name.
  *
- * The hook is deliberately neither of those by name. What it offers is a per-layer bound on
+ * The hook is deliberately none of those by name. What it offers is a per-layer bound on
  * how far consecutive outlines may differ, and the interesting part of the decision - which
  * angle, at which heights, how much of the part may be given up or gained for it - is a
  * property of the part and of what it is for. The same mechanism serves a plugin that makes
@@ -37,9 +42,9 @@
  * model alone below a given Z.
  *
  * Threading: called from PrintObject::slice(), once per layer, before anything is changed, so
- * every plugin sees the outlines the mesh gave. The two remedies are then applied as two
- * passes - every Clip layer bottom up, then every Fill layer top down - because each layer is
- * measured against the outline its neighbour was left with. Unlike the fill, pass and
+ * every plugin sees the outlines the mesh gave. The remedies are then applied as three passes
+ * - every Clip layer bottom up, then every Fill layer top down, then every Cap layer bottom up
+ * - because each layer is measured against the outline its neighbour was left with. Unlike the fill, pass and
  * perimeter planners this one is never entered concurrently, so an implementation backed by a
  * runtime that is not thread safe needs no lock of its own.
  */
@@ -108,6 +113,10 @@ struct Plan
      * Under the fill it bounds the cone instead, and 0 is the ordinary setting: the
      * whole point is usually to carry an overhang of any size, and a cone cannot run away in
      * any case because it terminates where it meets the part or the bed.
+     *
+     * Under the cap it is **the largest opening that may be closed**, and 0 - no limit - is the
+     * wrong setting there: a sacrificial layer over a 30 mm bore is a disc somebody has to cut
+     * out. A screw counterbore is a few millimetres.
      */
     double max_overhang_width{0.};
 
@@ -121,15 +130,17 @@ struct Plan
  * whatever that bound told the clip to leave alone on the way down. One plugin can therefore
  * spend a sliver of the model on a 1 mm ledge and a cone on a 10 mm shelf, in the same print.
  *
- * They are two fields rather than a list because the two passes run in opposite directions and
- * a layer can only be walked once in each.
+ * They are separate fields rather than a list because the passes run in different directions
+ * and a layer can only be walked once in each. The cap runs last of the three, so that the fill
+ * never sees a capped hole and tries to build a cone under it.
  */
 struct Plans
 {
     std::optional<Plan> clip;
     std::optional<Plan> fill;
+    std::optional<Plan> cap;
 
-    bool empty() const { return ! clip.has_value() && ! fill.has_value(); }
+    bool empty() const { return ! clip.has_value() && ! fill.has_value() && ! cap.has_value(); }
 };
 
 using Strategy = std::function<Plans(const LayerInfo& layer)>;
