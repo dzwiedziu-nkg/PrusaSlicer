@@ -8,6 +8,7 @@
 
 using Slic3r::App::Lua::make_perimeter_planner;
 using Slic3r::PerimeterPlanner::Plan;
+using Slic3r::PerimeterPlanner::plan_perimeters;
 using Slic3r::PerimeterPlanner::RegionInfo;
 using Slic3r::PerimeterPlanner::Strategy;
 
@@ -102,6 +103,83 @@ TEST_CASE_METHOD(PluginFixture, "[PerimeterPlannerPlugin] the layer reaches the 
     const auto odd = planner(region(5, 2));
     REQUIRE(odd.has_value());
     REQUIRE(odd->perimeters == 3);
+}
+
+TEST_CASE_METHOD(PluginFixture, "[PerimeterPlannerPlugin] a table may ask for the unsupported part to be filled")
+{
+    const Strategy planner = planner_for(R"(
+        function plan_perimeters(region)
+            return {unsupported = "fill_holes"}
+        end
+    )");
+    REQUIRE(static_cast<bool>(planner));
+
+    const auto planned = planner(region(4, 2));
+    REQUIRE(planned.has_value());
+    // Saying nothing about the count keeps the settings' count, which is not the same as
+    // declining now that there is something else to ask for.
+    REQUIRE(planned->perimeters == 2);
+    REQUIRE(planned->unsupported == Slic3r::PerimeterPlanner::Unsupported::FillHoles);
+    REQUIRE(planned->unsupported_anchor == 0.);
+    REQUIRE(planned->min_unsupported == 0.);
+}
+
+TEST_CASE_METHOD(PluginFixture, "[PerimeterPlannerPlugin] the two distances reach the slicer")
+{
+    const Strategy planner = planner_for(R"(
+        function plan_perimeters(region)
+            return {unsupported = "fill_all", unsupported_anchor = 0.8, min_unsupported = 0.3}
+        end
+    )");
+    REQUIRE(static_cast<bool>(planner));
+
+    const auto planned = planner(region());
+    REQUIRE(planned.has_value());
+    REQUIRE(planned->unsupported == Slic3r::PerimeterPlanner::Unsupported::FillAll);
+    REQUIRE(planned->unsupported_anchor == 0.8);
+    REQUIRE(planned->min_unsupported == 0.3);
+}
+
+TEST_CASE_METHOD(PluginFixture, "[PerimeterPlannerPlugin] a wall count and a policy travel together")
+{
+    const Strategy planner = planner_for(R"(
+        function plan_perimeters(region)
+            return {perimeters = region.perimeters + 1, unsupported = "fill_holes"}
+        end
+    )");
+    REQUIRE(static_cast<bool>(planner));
+
+    const auto planned = planner(region(4, 2));
+    REQUIRE(planned.has_value());
+    REQUIRE(planned->perimeters == 3);
+    REQUIRE(planned->unsupported == Slic3r::PerimeterPlanner::Unsupported::FillHoles);
+}
+
+TEST_CASE_METHOD(PluginFixture, "[PerimeterPlannerPlugin] an unsupported that is not one of the three is refused")
+{
+    const Strategy planner = planner_for(R"(
+        function plan_perimeters(region)
+            return {unsupported = "ignore"}
+        end
+    )");
+    REQUIRE(static_cast<bool>(planner));
+
+    REQUIRE_FALSE(planner(region()).has_value());
+}
+
+TEST_CASE_METHOD(PluginFixture, "[PerimeterPlannerPlugin] the same count with no policy is still declining")
+{
+    const Strategy planner = planner_for(R"(
+        function plan_perimeters(region)
+            return {perimeters = region.perimeters, unsupported = "wall"}
+        end
+    )");
+    REQUIRE(static_cast<bool>(planner));
+
+    // The bridge reports what the plugin said; the contract is what decides it asks for
+    // nothing, and that is what keeps the slicer off an override path for no reason.
+    REQUIRE(planner(region(4, 2)).has_value());
+    REQUIRE_FALSE(plan_perimeters(planner, region(4, 2)).has_value());
 }
 
 TEST_CASE_METHOD(PluginFixture, "[PerimeterPlannerPlugin] declining uses the settings' count")
