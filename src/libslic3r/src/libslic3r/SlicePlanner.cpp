@@ -73,7 +73,8 @@ Plans plan_slice(const Strategy& strategy, const LayerInfo& layer)
     return Plans{
         checked(planned.clip, layer),
         checked(planned.fill, layer),
-        checked(planned.cap, layer)};
+        checked(planned.cap, layer),
+        checked(planned.trim, layer)};
 }
 
 } // namespace Slic3r::SlicePlanner

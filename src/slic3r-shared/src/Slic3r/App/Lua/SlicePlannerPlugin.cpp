@@ -82,7 +82,8 @@ public:
     {
         Clip,
         Fill,
-        Cap
+        Cap,
+        Trim
     };
 
     static const char* name_of(const Remedy remedy)
@@ -90,6 +91,7 @@ public:
         switch (remedy) {
         case Remedy::Fill: return "fill";
         case Remedy::Cap: return "cap";
+        case Remedy::Trim: return "trim";
         default: return "clip";
         }
     }
@@ -100,6 +102,7 @@ public:
         switch (remedy) {
         case Remedy::Fill: return plans.fill;
         case Remedy::Cap: return plans.cap;
+        case Remedy::Trim: return plans.trim;
         default: return plans.clip;
         }
     }
@@ -140,10 +143,12 @@ public:
                 remedy_out = Remedy::Fill;
             } else if (name == "cap") {
                 remedy_out = Remedy::Cap;
+            } else if (name == "trim") {
+                remedy_out = Remedy::Trim;
             } else if (name != "clip") {
                 disable(fmt::format(
                     "plan_slice() answered with a remedy of '{}', which is none of "
-                    "'clip', 'fill' and 'cap'",
+                    "'clip', 'fill', 'cap' and 'trim'",
                     name
                 ));
                 return std::nullopt;
@@ -189,7 +194,8 @@ public:
         // A bare number is the common answer and means how far the outline may grow, clipped.
         if (returned.get_type() == sol::type::number) {
             ++m_bounded;
-            return SlicePlanner::Plans{SlicePlanner::Plan{returned.as<double>()}, std::nullopt, std::nullopt};
+            return SlicePlanner::Plans{
+                SlicePlanner::Plan{returned.as<double>()}, std::nullopt, std::nullopt, std::nullopt};
         }
         if (returned.get_type() != sol::type::table) {
             disable("plan_slice() answered with neither a table, a number nor nil");

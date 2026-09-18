@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <optional>
 
+#include "libslic3r/BridgeDetector.hpp"
 #include "libslic3r/ClipperUtils.hpp"
 #include "libslic3r/ElephantFootCompensation.hpp"
 #include "libslic3r/I18N_private.hpp"
@@ -710,6 +711,67 @@ static bool cap_unsupported_holes(
     return true;
 }
 
+/**
+ * @brief Takes off the part of a layer that hangs over air and no bridge can cross.
+ *
+ * A ring of material round a hole is the case, and a counterbore makes one: the lines beside
+ * the hole cross the ring from one edge to the other and are held at both ends, but the lines
+ * that would pass through the hole are cut in half by it and each half stops in mid-air. Those
+ * two lobes cannot be printed as a bridge however the filler is asked to lay them.
+ *
+ * Taking them off the outline is how the part stops claiming material it is not going to print.
+ * It matters to the layer above more than to this one: the outline is what tells the layer
+ * above whether it has anything to rest on, and left in place it would lay solid infill over a
+ * gap believing it solid.
+ *
+ * BridgeDetector answers which part can be crossed - it is what the slicer uses to choose a
+ * bridge's direction - and everything else that hangs is the answer here. Two things are never
+ * taken: an island with nothing at all under it, which is a feature starting at this height
+ * rather than a ledge on one already being printed, and a piece too big to fit a disc of
+ * @c plan.max_overhang_width in, since this removes material from the part.
+ *
+ * Returns nothing when the layer comes through untouched.
+ */
+static std::optional<ExPolygons> trim_unbridgeable(
+    const ExPolygons &slices, const ExPolygons &below, const SlicePlanner::Plan &plan,
+    const coord_t spacing)
+{
+    if (below.empty() || spacing <= 0) {
+        return std::nullopt;
+    }
+    const float max_removed = scaled<float>(0.5 * plan.max_overhang_width);
+
+    ExPolygons unbridgeable;
+    for (const ExPolygon &island : slices) {
+        const ExPolygons one{ island };
+        if (intersection_ex(one, below).empty()) {
+            // Nothing at all under it: a feature that starts here, not a ledge.
+            continue;
+        }
+        ExPolygons hanging = diff_ex(one, below);
+        // A sliver narrower than a bead is noise along every sloping face in the part.
+        hanging = opening_ex(hanging, 0.5f * float(spacing));
+        if (hanging.empty()) {
+            continue;
+        }
+        BridgeDetector detector{ hanging, below, spacing };
+        ExPolygons cannot = detector.detect_angle() ?
+            diff_ex(hanging, union_ex(detector.coverage())) : hanging;
+        cannot = opening_ex(cannot, 0.5f * float(spacing));
+        for (ExPolygon &piece : cannot) {
+            if (max_removed > 0.f && ! offset_ex(piece, - max_removed).empty()) {
+                // Too big to take off quietly. Left in one piece, as an overhang is.
+                continue;
+            }
+            unbridgeable.emplace_back(std::move(piece));
+        }
+    }
+    if (unbridgeable.empty()) {
+        return std::nullopt;
+    }
+    return diff_ex(slices, unbridgeable);
+}
+
 // Called by slice(), after the layers exist and their outlines are final.
 // Offers every layer to the slice planner and then holds the ones it bounds to their bound.
 //
@@ -740,6 +802,7 @@ void PrintObject::apply_slice_plans()
     size_t to_clip = 0;
     size_t to_fill = 0;
     size_t to_cap = 0;
+    size_t to_trim = 0;
     for (size_t layer_id = 0; layer_id < m_layers.size(); ++ layer_id) {
         m_print->throw_if_canceled();
         const Layer &layer = *m_layers[layer_id];
@@ -755,8 +818,10 @@ void PrintObject::apply_slice_plans()
             ++ to_fill;
         if (plans[layer_id].cap.has_value())
             ++ to_cap;
+        if (plans[layer_id].trim.has_value())
+            ++ to_trim;
     }
-    if (to_clip == 0 && to_fill == 0 && to_cap == 0)
+    if (to_clip == 0 && to_fill == 0 && to_cap == 0 && to_trim == 0)
         return;
 
     size_t clipped = 0;
@@ -823,10 +888,43 @@ void PrintObject::apply_slice_plans()
         }
     }
 
-    if (clipped > 0 || widened > 0 || capped > 0)
+    // After the cap, and after the fill for the same reason: a piece about to be taken off is
+    // not something to hold up with a cone.
+    size_t trimmed = 0;
+    if (to_trim > 0) {
+        SPDLOG_DEBUG("Slicing - trimming what cannot be bridged");
+        ExPolygons below = m_layers.front()->lslices;
+        for (size_t layer_id = 1; layer_id < m_layers.size(); ++ layer_id) {
+            m_print->throw_if_canceled();
+            Layer &layer = *m_layers[layer_id];
+            // What this layer looked like before the trim, which is what the next one is
+            // measured against. Measuring it against the trimmed outline instead makes the
+            // pass chase its own tail: the layer above a piece just taken off is unsupported
+            // where the piece was, part of that is unbridgeable in turn, and the hole walks up
+            // the part - three layers of it on a Ø12 counterbore, with solid shell built round
+            // the void. The question this pass asks is what the *mesh* leaves hanging.
+            ExPolygons before = layer.lslices;
+            const std::optional<SlicePlanner::Plan> &plan = plans[layer_id].trim;
+            if (plan.has_value() && layer.region_count() > 0) {
+                const coord_t spacing = layer.get_region(0)->flow(frPerimeter).scaled_spacing();
+                if (std::optional<ExPolygons> kept =
+                        trim_unbridgeable(layer.lslices, below, *plan, spacing)) {
+                    const Polygons trimming = Algorithms::ExPolygon::to_polygons(*kept);
+                    for (LayerRegion *layerm : layer.m_regions)
+                        layerm->trim_surfaces(trimming);
+                    layer.make_slices();
+                    ++ trimmed;
+                }
+            }
+            below = std::move(before);
+        }
+    }
+
+    if (clipped > 0 || widened > 0 || capped > 0 || trimmed > 0)
         SPDLOG_INFO(
-            "Slice planner clipped {}, widened {} and capped {} of the {} layers of object {}",
-            clipped, widened, capped, m_layers.size(), this->model_object()->name);
+            "Slice planner clipped {}, widened {}, capped {} and trimmed {} of the {} layers of "
+            "object {}",
+            clipped, widened, capped, trimmed, m_layers.size(), this->model_object()->name);
 }
 
 // Called by make_perimeters()
