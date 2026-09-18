@@ -623,6 +623,93 @@ static bool widen_to_carry(
     return true;
 }
 
+/**
+ * @brief Closes the holes of one layer whose rim hangs over air, and says whether it had to.
+ *
+ * A counterbore is the case: the opening narrows from one layer to the next, so the ring left
+ * round the smaller hole is printed onto air - and so, wall and all, is the hole's own
+ * perimeter. The slicer bridges the ring but still draws that perimeter in mid-air. Closing the
+ * hole for this one layer leaves a bridge spanning the whole opening with nothing suspended in
+ * it, and the layer above keeps its hole because this layer is now solid underneath it.
+ *
+ * The test is the rim rather than the hole: the band of material just outside the hole, as wide
+ * as the layer is allowed to reach past the one below, has to be mostly unsupported. A hole
+ * going straight down has a supported rim and is left alone; so is one that widens on the way
+ * up, and so is a bore that tapers gently enough for the rim to stay mostly on solid material.
+ */
+static bool cap_unsupported_holes(
+    Layer &layer, const ExPolygons &below, const SlicePlanner::Plan &plan)
+{
+    const ExPolygons unsupported = diff_ex(layer.lslices, below);
+    if (unsupported.empty()) {
+        return false;
+    }
+    // A rim narrower than a bead would be noise; the plan's reach is the meaningful width and
+    // is what the other two remedies measure with.
+    const float rim = scaled<float>(std::max(plan.max_overhang, 0.1));
+    const float max_capped = scaled<float>(0.5 * plan.max_overhang_width);
+
+    ExPolygons caps;
+    for (const ExPolygon &island : layer.lslices) {
+        if (island.holes.empty()) {
+            continue;
+        }
+        // Each hole as a filled disc, with the orientation clipper wants, without touching the
+        // stored contours: the island's outline less the island itself is exactly its holes.
+        for (ExPolygon &hole : diff_ex(ExPolygons{ExPolygon{island.contour}}, ExPolygons{island})) {
+            if (max_capped > 0.f && ! offset_ex(hole, - max_capped).empty()) {
+                // Bigger than the plugin allows to be closed. A sacrificial layer is material
+                // somebody has to cut out afterwards, so the bound is the whole of the safety.
+                continue;
+            }
+            const ExPolygons band = diff_ex(offset_ex(hole, rim), ExPolygons{hole});
+            double band_area = 0.;
+            for (const ExPolygon &piece : band) {
+                band_area += piece.area();
+            }
+            if (band_area <= 0.) {
+                continue;
+            }
+            double hanging = 0.;
+            for (const ExPolygon &piece : intersection_ex(band, unsupported)) {
+                hanging += piece.area();
+            }
+            if (hanging < 0.5 * band_area) {
+                continue;
+            }
+            caps.emplace_back(std::move(hole));
+        }
+    }
+    if (caps.empty()) {
+        return false;
+    }
+
+    // The cap belongs to whichever region of this layer surrounds the hole, so a multi-material
+    // part bridges the opening in the material the hole is bored through.
+    const size_t region_count = layer.region_count();
+    for (size_t region_id = 0; region_id < region_count && ! caps.empty(); ++ region_id) {
+        ExPolygons mine;
+        if (region_id + 1 == region_count) {
+            // Last one takes whatever is left, so nothing is silently dropped.
+            mine = std::move(caps);
+            caps.clear();
+        } else {
+            const ExPolygons own = to_expolygons(layer.get_region(int(region_id))->slices().surfaces);
+            if (own.empty()) {
+                continue;
+            }
+            mine = intersection_ex(caps, offset_ex(own, rim));
+            if (mine.empty()) {
+                continue;
+            }
+            caps = diff_ex(caps, mine);
+        }
+        layer.get_region(int(region_id))->add_surfaces(mine);
+    }
+    layer.make_slices();
+    return true;
+}
+
 // Called by slice(), after the layers exist and their outlines are final.
 // Offers every layer to the slice planner and then holds the ones it bounds to their bound.
 //
@@ -652,6 +739,7 @@ void PrintObject::apply_slice_plans()
     std::vector<SlicePlanner::Plans> plans(m_layers.size());
     size_t to_clip = 0;
     size_t to_fill = 0;
+    size_t to_cap = 0;
     for (size_t layer_id = 0; layer_id < m_layers.size(); ++ layer_id) {
         m_print->throw_if_canceled();
         const Layer &layer = *m_layers[layer_id];
@@ -665,8 +753,10 @@ void PrintObject::apply_slice_plans()
             ++ to_clip;
         if (plans[layer_id].fill.has_value())
             ++ to_fill;
+        if (plans[layer_id].cap.has_value())
+            ++ to_cap;
     }
-    if (to_clip == 0 && to_fill == 0)
+    if (to_clip == 0 && to_fill == 0 && to_cap == 0)
         return;
 
     size_t clipped = 0;
@@ -716,9 +806,27 @@ void PrintObject::apply_slice_plans()
         }
     }
 
-    if (clipped > 0 || widened > 0)
-        SPDLOG_INFO("Slice planner clipped {} and widened {} of the {} layers of object {}",
-            clipped, widened, m_layers.size(), this->model_object()->name);
+    // Last of the three, and after the fill on purpose: a capped hole is meant to be
+    // unsupported, and a fill pass that saw one would dutifully build a cone under it.
+    size_t capped = 0;
+    if (to_cap > 0) {
+        SPDLOG_DEBUG("Slicing - capping unsupported holes");
+        // The bottom layer is printed onto the bed, so no hole of it hangs over anything.
+        ExPolygons below = m_layers.front()->lslices;
+        for (size_t layer_id = 1; layer_id < m_layers.size(); ++ layer_id) {
+            m_print->throw_if_canceled();
+            Layer &layer = *m_layers[layer_id];
+            const std::optional<SlicePlanner::Plan> &plan = plans[layer_id].cap;
+            if (plan.has_value() && cap_unsupported_holes(layer, below, *plan))
+                ++ capped;
+            below = layer.lslices;
+        }
+    }
+
+    if (clipped > 0 || widened > 0 || capped > 0)
+        SPDLOG_INFO(
+            "Slice planner clipped {}, widened {} and capped {} of the {} layers of object {}",
+            clipped, widened, capped, m_layers.size(), this->model_object()->name);
 }
 
 // Called by make_perimeters()

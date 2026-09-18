@@ -527,7 +527,7 @@ function plan_slice(layer)
     return {
         max_overhang = layer.layer_height / math.tan(math.rad(35)),
         max_overhang_width = 2.0,
-        remedy = "clip"                 -- or "fill"
+        remedy = "clip"                 -- or "fill", or "cap"
     }
 end
 ```
@@ -542,7 +542,7 @@ when a plugin asks for it in so many words. Zero is a real answer and a very dif
 outline may not widen at all. Distances outside 0 to 1000 mm are clamped and a distance that is
 not a finite number is refused, both of which are guards rather than physical limits.
 
-### The two remedies
+### The three remedies
 
 `remedy` says what to do about material that falls outside the bound, and defaults to `"clip"`
 so that a bare number, or a table from before the field existed, still means what it meant.
@@ -557,16 +557,25 @@ so that a bare number, or a table from before the field existed, still means wha
   material down to whatever holds it up, the part comes out larger and nothing of the mesh is
   lost. This is what OrcaSlicer calls `make_overhang_printable`. On a multi-material print the
   new material belongs to whichever region of the layer above sits over it.
+- **`"cap"`** closes the opening the overhang hangs over, on that one layer. A hole whose rim
+  hangs over air - the band just outside it, `max_overhang` wide, mostly over nothing - is
+  filled in, so the opening is bridged in one span with nothing suspended in it, and the layer
+  above keeps its hole because this layer is now solid under it. A counterbore is the case:
+  without it the slicer draws the narrow hole's own wall in mid-air. This is OrcaSlicer's
+  `counterbore_hole_bridging` in `sacrificiallayer` mode, and like theirs it leaves material
+  that has to be drilled out.
 
-`max_overhang_width` bounds how much may be cut away or added, measured as the largest disc that
-fits inside the piece in question; an overhang too big to fit under it is left alone in one
+`max_overhang_width` bounds how much may be cut away, added or closed, measured as the largest
+disc that fits inside the piece in question; an overhang too big to fit under it is left alone in one
 piece. Under `"clip"` that is what keeps it to the edges - chamfering only the outer rim of a big
 ledge would reshape the part *and* still leave an overhang needing support - and it is also what
 bounds a slope shallower than the angle asked for, since each layer is measured against the
 outline the layer below was *left* with, so the shortfall accumulates until it no longer fits and
 the layer is handed back in full. Under `"fill"` it bounds the cone, and 0 - no limit - is the
 ordinary setting there, because the point is usually to carry an overhang of any size and a cone
-cannot run away in any case: it terminates where it meets the part or the bed.
+cannot run away in any case: it terminates where it meets the part or the bed. Under the cap it
+is the largest opening that may be closed, and 0 is the wrong answer there: a sacrificial layer
+over a 30 mm bore is a disc somebody has to cut out.
 
 ### Asking for both at once
 
@@ -585,12 +594,15 @@ end
 That is how a plugin says *cut the small overhangs off and carry whatever is left*. The size
 bounds do the choosing: the clip is told to leave alone anything wider than 2 mm, so it takes
 only the small ledges on the way up, and the fill then carries what the clip left on the way
-down. At most one plan per remedy - two `"clip"` entries for the same layer is refused.
+down. At most one plan per remedy - two `"clip"` entries for the same layer is refused, and so
+are two `"cap"` entries.
 
 Called once per layer during slicing, before anything is changed, so a plugin always sees the
-outlines the mesh gave. The answers are then applied as two passes, every clip bottom up and
-then every fill top down, because each layer is measured against the outline its neighbour was
-left with - which is what makes a run of them a slope rather than a staircase. Unlike the fill,
+outlines the mesh gave. The answers are then applied as three passes: every clip bottom up, then
+every fill top down, then every cap bottom up. Each layer is measured against the outline its
+neighbour was left with, which is what makes a run of them a slope rather than a staircase. The
+cap runs last on purpose - a fill pass that saw a capped hole would build a cone under it, which
+is the opposite of the point. Unlike the fill,
 pass and perimeter planners it is never entered concurrently, so a strategy here needs no lock
 of its own.
 
