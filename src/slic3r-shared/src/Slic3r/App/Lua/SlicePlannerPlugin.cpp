@@ -1,6 +1,7 @@
 #include "Slic3r/App/Lua/SlicePlannerPlugin.hpp"
 
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ranges>
 
@@ -153,6 +154,11 @@ public:
 
     SlicePlanner::Plans operator()(const LayerInfo& layer)
     {
+        // Layers of one object arrive in order and one at a time, but Print::process() runs
+        // make_perimeters() - and therefore slice() - over the objects of a plate in parallel,
+        // so two objects reach this at the same time. Every touch of the Lua state is under
+        // m_mutex for that reason, and only for that reason.
+        const std::lock_guard<std::mutex> guard{m_mutex};
         if (m_disabled) {
             return {};
         }
@@ -251,6 +257,7 @@ private:
     PackageRegistry m_packages;
     Plugin m_plugin;
     sol::protected_function m_plan_slice;
+    std::mutex m_mutex;
     bool m_disabled{false};
     std::size_t m_seen{0};
     std::size_t m_bounded{0};
