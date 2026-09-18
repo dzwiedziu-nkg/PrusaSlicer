@@ -636,7 +636,13 @@ outlines the mesh gave. The answers are then applied as three passes: every clip
 every fill top down, then every cap bottom up. Each layer is measured against the outline its
 neighbour was left with, which is what makes a run of them a slope rather than a staircase. The
 cap runs last on purpose - a fill pass that saw a capped hole would build a cone under it, which
-is the opposite of the point. Unlike the fill,
+is the opposite of the point.
+
+The layers of one object arrive in order and one at a time. **The objects of a plate are sliced
+in parallel**, though, so a plugin is entered from several threads at once whenever the plate
+holds more than one object. The Lua bridge serializes itself with a mutex, as the fill, pass and
+perimeter planners do; a plugin does not have to be thread safe, but it is a serialization
+point. Unlike the fill,
 pass and perimeter planners it is never entered concurrently, so a strategy here needs no lock
 of its own.
 

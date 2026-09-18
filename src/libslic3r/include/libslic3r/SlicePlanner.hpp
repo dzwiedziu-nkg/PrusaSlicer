@@ -44,9 +44,14 @@
  * Threading: called from PrintObject::slice(), once per layer, before anything is changed, so
  * every plugin sees the outlines the mesh gave. The remedies are then applied as three passes
  * - every Clip layer bottom up, then every Fill layer top down, then every Cap layer bottom up
- * - because each layer is measured against the outline its neighbour was left with. Unlike the fill, pass and
- * perimeter planners this one is never entered concurrently, so an implementation backed by a
- * runtime that is not thread safe needs no lock of its own.
+ * - because each layer is measured against the outline its neighbour was left with.
+ *
+ * The layers of one object arrive in order and one at a time, which is what lets the passes be
+ * walked in a direction at all. **The objects of a plate are sliced in parallel**, though:
+ * Print::process() drives make_perimeters(), and so slice(), over them from a tbb::parallel_for.
+ * A Strategy is therefore entered from several threads at once on a plate holding more than one
+ * object, and an implementation backed by a runtime that is not thread safe has to serialize
+ * itself. Believing otherwise was a crash in roughly one slice in three.
  */
 namespace Slic3r::SlicePlanner {
 
