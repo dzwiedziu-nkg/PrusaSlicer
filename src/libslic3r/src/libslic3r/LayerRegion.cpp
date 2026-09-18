@@ -100,6 +100,12 @@ namespace {
  * The cut takes a band of held-up material with it, so the bridge has ends to rest on, and the
  * wall then runs round the outside of that band on material that is supported.
  *
+ * What is filled is not the whole of the unsupported area but the part of it a straight line
+ * can cross with an anchor at each end, which BridgeDetector works out. Round a counterbore the
+ * difference is the two lobes beside the hole: every line there runs from the outer edge to the
+ * hole's rim and stops in mid-air, and the filler joins those stubs with hops over the opening.
+ * They are dropped - not walled either, since a wall round them would hang in the same air.
+ *
  * @param walled out: the pieces the perimeter generator is to be given, left empty when there
  *        is nothing to cut out and the surface should go to it whole.
  * @return the area to hand to the fill stage, empty when nothing is to be cut out.
@@ -148,15 +154,46 @@ ExPolygons unsupported_to_fill(
         }
     }
 
-    ExPolygons carve = intersection_ex(whole, offset_ex(unsupported, anchor));
-    ExPolygons rest  = diff_ex(whole, carve);
+    // Only the part that can be crossed by a straight line anchored at both ends is worth
+    // filling. Round a counterbore the rest is the two lobes beside the hole, where every line
+    // runs from the outer edge to the hole's rim and stops in mid-air, and the filler joins
+    // those stubs to each other with hops over the opening. Neither is a bridge.
+    //
+    // BridgeDetector answers exactly that question - it is what the slicer uses to choose a
+    // bridge's direction, and its coverage() keeps the trapezoids with support on two sides.
+    // It is documented as slow, which is why it runs last, after the cheap tests have thrown
+    // out the slivers along every sloping wall in the part.
+    BridgeDetector detector{ unsupported, *lower_slices, coord_t(min_width * 2.f) };
+    if (! detector.detect_angle()) {
+        return {};
+    }
+    // Taken as it comes. An opening here to drop the wedges along a tangent to the hole was
+    // tried and rejected: it changed nothing on a Ø12 counterbore and wiped out the mask
+    // altogether on a Ø6 one, where the whole ring is only a millimetre and a half wide.
+    const ExPolygons bridgeable = union_ex(detector.coverage());
+    if (bridgeable.empty()) {
+        return {};
+    }
+
+    // Everything unsupported leaves the wall stage, including what will not be filled: a wall
+    // round the part that cannot be bridged is a wall in mid-air, which is the thing being
+    // removed.
+    const ExPolygons carve = intersection_ex(whole, offset_ex(unsupported, anchor));
+    ExPolygons rest = diff_ex(whole, carve);
     if (rest.empty()) {
         // The whole region would go unwalled. That is a different thing from bridging a step in
         // a hole, and it is not what the plugin asked for, so leave the region as it was.
         return {};
     }
     walled = std::move(rest);
-    return carve;
+
+    // What goes to the fill is the bridgeable part and a band of held-up material for it to be
+    // anchored on. The band is taken from the supported side only: grown in every direction it
+    // would reach back over the lobes the coverage test just threw out, and the stubs and the
+    // hops over the opening would come back with them.
+    const ExPolygons supported = diff_ex(whole, unsupported);
+    const ExPolygons band = intersection_ex(supported, offset_ex(bridgeable, anchor));
+    return intersection_ex(whole, union_ex(bridgeable, band));
 }
 
 } // namespace
