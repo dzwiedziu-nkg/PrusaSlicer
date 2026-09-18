@@ -77,6 +77,41 @@ TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a bare number is the growt
     REQUIRE(planned.clip->max_overhang_width == 0.);
 }
 
+TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a remedy of trim asks for the fourth pass")
+{
+    const Strategy planner = planner_for(R"(
+        function plan_slice(layer)
+            return {max_overhang = 0.3, max_overhang_width = 6.0, remedy = "trim"}
+        end
+    )");
+    REQUIRE(static_cast<bool>(planner));
+
+    const auto planned = planner(layer());
+    REQUIRE(planned.trim.has_value());
+    REQUIRE(planned.trim->max_overhang_width == 6.0);
+    REQUIRE_FALSE(planned.clip.has_value());
+    REQUIRE_FALSE(planned.cap.has_value());
+}
+
+TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a layer may ask for a cap and a trim at once")
+{
+    const Strategy planner = planner_for(R"(
+        function plan_slice(layer)
+            return {
+                {max_overhang = 0.3, max_overhang_width = 10.0, remedy = "cap"},
+                {max_overhang = 0.3, max_overhang_width = 6.0, remedy = "trim"}
+            }
+        end
+    )");
+    REQUIRE(static_cast<bool>(planner));
+
+    const auto planned = planner(layer());
+    REQUIRE(planned.cap.has_value());
+    REQUIRE(planned.trim.has_value());
+    REQUIRE(planned.cap->max_overhang_width == 10.0);
+    REQUIRE(planned.trim->max_overhang_width == 6.0);
+}
+
 TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a remedy of cap asks for the third pass")
 {
     const Strategy planner = planner_for(R"(
