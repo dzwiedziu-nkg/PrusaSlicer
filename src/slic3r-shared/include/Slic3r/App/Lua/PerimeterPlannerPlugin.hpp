@@ -10,7 +10,7 @@ namespace Slic3r::App::Lua {
 /**
  * @brief Version of the `slicing.perimeter_planner` plugin API implemented here.
  */
-constexpr auto PERIMETER_PLANNER_API_VERSION = "1.0.0";
+constexpr auto PERIMETER_PLANNER_API_VERSION = "1.1.0";
 
 /**
  * @brief Builds a perimeter planner from the installed slicing plugin.

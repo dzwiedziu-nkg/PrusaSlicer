@@ -71,7 +71,7 @@ public:
     {
         if (m_changed > 0) {
             SPDLOG_INFO(
-                "Perimeter planner plugin {} changed the wall count on {} of {} layer regions",
+                "Perimeter planner plugin {} answered for {} of {} layer regions",
                 m_plugin.meta().id,
                 m_changed,
                 m_seen
@@ -113,24 +113,69 @@ public:
         // A bare number is the common answer and means the wall count.
         if (returned.get_type() == sol::type::number) {
             ++m_changed;
-            return PerimeterPlanner::Plan{returned.as<int>()};
+            return PerimeterPlanner::Plan{returned.as<int>()};  // NOLINT: a bare count
         }
         if (returned.get_type() != sol::type::table) {
             disable("plan_perimeters() answered with neither a table, a number nor nil");
             return std::nullopt;
         }
 
-        const sol::object count = returned.as<sol::table>()["perimeters"];
-        if (count.get_type() == sol::type::none || count.get_type() == sol::type::nil) {
-            // A table that says nothing about the count asks for no change.
-            return std::nullopt;
+        const sol::table answer = returned.as<sol::table>();
+        PerimeterPlanner::Plan plan{region.perimeters};
+        bool said_something = false;
+
+        const sol::object count = answer["perimeters"];
+        if (count.get_type() != sol::type::none && count.get_type() != sol::type::nil) {
+            if (count.get_type() != sol::type::number) {
+                disable("plan_perimeters() answered with a perimeters that is not a number");
+                return std::nullopt;
+            }
+            plan.perimeters = count.as<int>();
+            said_something = true;
         }
-        if (count.get_type() != sol::type::number) {
-            disable("plan_perimeters() answered with a perimeters that is not a number");
+
+        const sol::object unsupported = answer["unsupported"];
+        if (unsupported.get_type() != sol::type::none && unsupported.get_type() != sol::type::nil) {
+            if (unsupported.get_type() != sol::type::string) {
+                disable("plan_perimeters() answered with an unsupported that is not a string");
+                return std::nullopt;
+            }
+            const std::string name = unsupported.as<std::string>();
+            if (name == "fill_holes") {
+                plan.unsupported = PerimeterPlanner::Unsupported::FillHoles;
+            } else if (name == "fill_all") {
+                plan.unsupported = PerimeterPlanner::Unsupported::FillAll;
+            } else if (name != "wall") {
+                disable(fmt::format(
+                    "plan_perimeters() answered with an unsupported of '{}', which is none of "
+                    "'wall', 'fill_holes' and 'fill_all'",
+                    name
+                ));
+                return std::nullopt;
+            }
+            said_something = true;
+        }
+
+        for (const auto& [key, distance] : {
+                 std::pair<const char*, double*>{"unsupported_anchor", &plan.unsupported_anchor},
+                 std::pair<const char*, double*>{"min_unsupported", &plan.min_unsupported}}) {
+            const sol::object given = answer[key];
+            if (given.get_type() == sol::type::none || given.get_type() == sol::type::nil) {
+                continue;
+            }
+            if (given.get_type() != sol::type::number) {
+                disable(fmt::format("plan_perimeters() answered with a {} that is not a number", key));
+                return std::nullopt;
+            }
+            *distance = given.as<double>();
+        }
+
+        if (!said_something) {
+            // A table that says nothing about either asks for no change.
             return std::nullopt;
         }
         ++m_changed;
-        return PerimeterPlanner::Plan{count.as<int>()};
+        return plan;
     }
 
 private:
