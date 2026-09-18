@@ -576,7 +576,7 @@ when a plugin asks for it in so many words. Zero is a real answer and a very dif
 outline may not widen at all. Distances outside 0 to 1000 mm are clamped and a distance that is
 not a finite number is refused, both of which are guards rather than physical limits.
 
-### The three remedies
+### The four remedies
 
 `remedy` says what to do about material that falls outside the bound, and defaults to `"clip"`
 so that a bare number, or a table from before the field existed, still means what it meant.
@@ -598,6 +598,14 @@ so that a bare number, or a table from before the field existed, still means wha
   without it the slicer draws the narrow hole's own wall in mid-air. This is OrcaSlicer's
   `counterbore_hole_bridging` in `sacrificiallayer` mode, and like theirs it leaves material
   that has to be drilled out.
+- **`"trim"`** takes off the part of the overhang that no straight line can cross with an anchor
+  at each end. A ring of material round a hole is the case: the lines beside the hole span it,
+  the lines that would pass through it are cut in half and each half stops in mid-air. Taking
+  that part off the outline is how the part stops claiming material it is not going to print,
+  which matters to the layer above — the outline is what tells it whether it has anything to
+  rest on, and left in place it lays solid infill over the gap believing it solid. Two things
+  are never taken: an island with nothing at all under it, and a piece too big to fit a disc of
+  `max_overhang_width` in.
 
 `max_overhang_width` bounds how much may be cut away, added or closed, measured as the largest
 disc that fits inside the piece in question; an overhang too big to fit under it is left alone in one
@@ -621,7 +629,7 @@ function plan_slice(layer)
     return {
         {max_overhang = reach, max_overhang_width = 2.0, remedy = "clip"},
         {max_overhang = reach, max_overhang_width = 0.0, remedy = "fill"}
-    }
+    }   -- and "cap" or "trim" alongside them, at most one plan per remedy
 end
 ```
 
@@ -632,11 +640,13 @@ down. At most one plan per remedy - two `"clip"` entries for the same layer is r
 are two `"cap"` entries.
 
 Called once per layer during slicing, before anything is changed, so a plugin always sees the
-outlines the mesh gave. The answers are then applied as three passes: every clip bottom up, then
-every fill top down, then every cap bottom up. Each layer is measured against the outline its
+outlines the mesh gave. The answers are then applied as four passes: every clip bottom up, then
+every fill top down, then every cap and every trim bottom up. Each layer is measured against the outline its
 neighbour was left with, which is what makes a run of them a slope rather than a staircase. The
-cap runs last on purpose - a fill pass that saw a capped hole would build a cone under it, which
-is the opposite of the point.
+cap and the trim run after the fill on purpose - a fill pass that saw a capped hole would build
+a cone under it, and one that saw a piece about to be taken off would hold it up, which is the
+opposite of the point in both cases. The trim measures each layer against the outline the mesh
+gave rather than the one it has just trimmed, so that it cannot chase its own tail up the part.
 
 The layers of one object arrive in order and one at a time. **The objects of a plate are sliced
 in parallel**, though, so a plugin is entered from several threads at once whenever the plate

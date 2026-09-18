@@ -18,7 +18,7 @@
  * at most @c layer_height/tan(theta) outside the one below it, and a run of layers held to
  * that is a slope of exactly that angle.
  *
- * There are three ways to hold them to it, and the plugin picks per layer:
+ * There are four ways to hold them to it, and the plugin picks per layer:
  *
  *  - The **clip** takes the offending material off the upper layer, walking upward. The
  *    overhang is chamfered away and the part comes out a little smaller.
@@ -31,6 +31,12 @@
  *    keeps its hole, because the layer below it is now solid there. This is what OrcaSlicer
  *    calls a sacrificial layer for a counterbore hole, and the material has to be drilled out
  *    afterwards - which is why it is the one remedy that needs asking for by name.
+ *  - The **trim** takes off the part of the overhang that no straight line can cross with an
+ *    anchor at each end. A ring of material round a hole is the case: the lines beside the
+ *    hole span it, the lines that would pass through it are cut in half and each half stops in
+ *    mid-air. Taking that part off the outline is how the part stops claiming material it is
+ *    not going to print - which matters to the layer above, since it is the outline that tells
+ *    it whether it has anything to rest on.
  *
  * The hook is deliberately none of those by name. What it offers is a per-layer bound on
  * how far consecutive outlines may differ, and the interesting part of the decision - which
@@ -122,6 +128,9 @@ struct Plan
      * Under the cap it is **the largest opening that may be closed**, and 0 - no limit - is the
      * wrong setting there: a sacrificial layer over a 30 mm bore is a disc somebody has to cut
      * out. A screw counterbore is a few millimetres.
+     *
+     * Under the trim it is the largest piece that may be taken off, and 0 is the wrong answer
+     * there for the same reason: it is material removed from the part.
      */
     double max_overhang_width{0.};
 
@@ -136,16 +145,21 @@ struct Plan
  * spend a sliver of the model on a 1 mm ledge and a cone on a 10 mm shelf, in the same print.
  *
  * They are separate fields rather than a list because the passes run in different directions
- * and a layer can only be walked once in each. The cap runs last of the three, so that the fill
- * never sees a capped hole and tries to build a cone under it.
+ * and a layer can only be walked once in each. The cap and the trim run after the fill, so that
+ * it never sees a capped hole and tries to build a cone under it, nor a piece about to be taken
+ * off and tries to hold it up.
  */
 struct Plans
 {
     std::optional<Plan> clip;
     std::optional<Plan> fill;
     std::optional<Plan> cap;
+    std::optional<Plan> trim;
 
-    bool empty() const { return ! clip.has_value() && ! fill.has_value() && ! cap.has_value(); }
+    bool empty() const
+    {
+        return ! clip.has_value() && ! fill.has_value() && ! cap.has_value() && ! trim.has_value();
+    }
 };
 
 using Strategy = std::function<Plans(const LayerInfo& layer)>;
