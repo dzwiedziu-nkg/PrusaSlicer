@@ -23,6 +23,36 @@ double length(const Domain::Polyline& path)
     return total;
 }
 
+/** @brief Clamps a flow ratio into the allowed range, saying so once if it was outside. */
+double checked_flow_ratio(const double asked, const SurfaceInfo& surface)
+{
+    // A ratio outside the range is an arithmetic slip in the strategy rather than an
+    // intention; clamping keeps a stray zero or NaN from emptying the extruder.
+    if (std::isfinite(asked) && asked >= MIN_FLOW_RATIO && asked <= MAX_FLOW_RATIO) {
+        return asked;
+    }
+    SPDLOG_WARN(
+        "Fill planner asked for a flow ratio of {} on layer {}, which is outside {}..{}; "
+        "using the nearest allowed value",
+        asked, surface.layer_id, MIN_FLOW_RATIO, MAX_FLOW_RATIO
+    );
+    return std::isfinite(asked) ? std::clamp(asked, MIN_FLOW_RATIO, MAX_FLOW_RATIO) : 1.;
+}
+
+/** @brief Keeps a speed the role can be printed at, or 0 to leave the role's own. */
+double checked_speed(const double asked, const SurfaceInfo& surface)
+{
+    if (asked == 0. || (std::isfinite(asked) && asked >= MIN_SPEED && asked <= MAX_SPEED)) {
+        return asked;
+    }
+    SPDLOG_WARN(
+        "Fill planner asked for {} mm/s on layer {}, which is outside {}..{}; using the speed "
+        "the role asks for",
+        asked, surface.layer_id, MIN_SPEED, MAX_SPEED
+    );
+    return 0.;
+}
+
 } // namespace
 
 Plan plan_fill(const Strategy& strategy, const SurfaceInfo& surface, Domain::Polylines stock)
@@ -35,6 +65,18 @@ Plan plan_fill(const Strategy& strategy, const SurfaceInfo& surface, Domain::Pol
     if (!planned.has_value()) {
         // The strategy had no opinion about this surface.
         return Plan{std::move(stock)};
+    }
+
+    // A plan with no paths keeps the slicer's own and changes only how they are printed. It is
+    // the difference between "lay these lines" and "lay your lines, thinner": the second needs
+    // no geometry from the plugin and keeps the links between the lines, which the first loses.
+    //
+    // A surface the slicer lays with a width per point is always in that case: this contract
+    // has one width for the whole path, so geometry offered for one is dropped and only the
+    // flow and the speed are taken. SurfaceInfo::variable_width tells a strategy so.
+    if (planned->paths.empty() || surface.variable_width) {
+        return Plan{std::move(stock), checked_flow_ratio(planned->flow_ratio, surface),
+                    checked_speed(planned->speed, surface)};
     }
 
     // Clip to the surface rather than rejecting paths that overshoot it. A strategy
@@ -55,32 +97,8 @@ Plan plan_fill(const Strategy& strategy, const SurfaceInfo& surface, Domain::Pol
         return Plan{std::move(stock)};
     }
 
-    // A ratio outside the range is an arithmetic slip in the strategy rather than an
-    // intention; clamping keeps a stray zero or NaN from emptying the extruder.
-    double flow_ratio = planned->flow_ratio;
-    if (!std::isfinite(flow_ratio) || flow_ratio < MIN_FLOW_RATIO || flow_ratio > MAX_FLOW_RATIO) {
-        SPDLOG_WARN(
-            "Fill planner asked for a flow ratio of {} on layer {}, which is outside "
-            "{}..{}; using the nearest allowed value",
-            flow_ratio,
-            surface.layer_id,
-            MIN_FLOW_RATIO,
-            MAX_FLOW_RATIO
-        );
-        flow_ratio = std::isfinite(flow_ratio) ? std::clamp(flow_ratio, MIN_FLOW_RATIO, MAX_FLOW_RATIO) : 1.;
-    }
-    double speed = planned->speed;
-    if (speed != 0.) {
-        if (!std::isfinite(speed) || speed < MIN_SPEED || speed > MAX_SPEED) {
-            SPDLOG_WARN(
-                "Fill planner asked for {} mm/s on layer {}, which is outside {}..{}; "
-                "using the speed the role asks for",
-                speed, surface.layer_id, MIN_SPEED, MAX_SPEED
-            );
-            speed = 0.;
-        }
-    }
-    return Plan{std::move(clipped), flow_ratio, speed};
+    return Plan{std::move(clipped), checked_flow_ratio(planned->flow_ratio, surface),
+                checked_speed(planned->speed, surface)};
 }
 
 } // namespace Slic3r::FillPlanner

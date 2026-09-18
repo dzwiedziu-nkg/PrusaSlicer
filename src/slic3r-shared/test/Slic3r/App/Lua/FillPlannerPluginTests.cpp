@@ -72,6 +72,37 @@ TEST_CASE("[FillPlannerPlugin] no plugin installed leaves no planner")
     REQUIRE_FALSE(static_cast<bool>(make_fill_planner({empty_dir.path().string()})));
 }
 
+TEST_CASE_METHOD(PluginFixture, "[FillPlannerPlugin] a flow ratio with no paths keeps the slicer's own")
+{
+    const Strategy planner = planner_for(R"(
+        function plan_fill(surface)
+            return {flow_ratio = 0.9}
+        end
+    )");
+    REQUIRE(static_cast<bool>(planner));
+
+    const auto planned = planner(surface(square(), GCodeExtrusionRole::SolidInfill));
+    REQUIRE(planned.has_value());
+    REQUIRE(planned->paths.empty());
+    REQUIRE(planned->flow_ratio == 0.9);
+}
+
+TEST_CASE_METHOD(PluginFixture, "[FillPlannerPlugin] a speed with no paths keeps the slicer's own")
+{
+    const Strategy planner = planner_for(R"(
+        function plan_fill(surface)
+            return {speed = 25.0}
+        end
+    )");
+    REQUIRE(static_cast<bool>(planner));
+
+    const auto planned = planner(surface(square(), GCodeExtrusionRole::SolidInfill));
+    REQUIRE(planned.has_value());
+    REQUIRE(planned->paths.empty());
+    REQUIRE(planned->speed == 25.0);
+    REQUIRE(planned->flow_ratio == 1.0);
+}
+
 TEST_CASE_METHOD(PluginFixture, "[FillPlannerPlugin] returned paths replace the stock ones")
 {
     const Strategy planner = planner_for(R"(

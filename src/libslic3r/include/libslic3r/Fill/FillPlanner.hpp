@@ -86,6 +86,17 @@ struct SurfaceInfo
     bool external;
     /** @brief Direction the slicer chose, in radians. Negative when not a bridge. */
     double bridge_angle;
+
+    /**
+     * @brief True when the slicer lays this surface with a width that varies along the path.
+     *
+     * Solid infill is the ordinary case: PrusaSlicer fills it with the Arachne-based pattern,
+     * whose lines are thick polylines rather than centre lines. **Paths returned for such a
+     * surface are dropped**, because this contract carries one width for a whole path and
+     * cannot say what those lines say. A flow ratio and a speed still apply, which is enough
+     * for a strategy that wants the slicer's own lines printed differently.
+     */
+    bool variable_width;
 };
 
 /** @brief How far from the slicer's own flow a strategy is allowed to ask to go. */
@@ -99,7 +110,15 @@ constexpr double MAX_SPEED = 1000.;
 /** @brief How one surface is to be filled. */
 struct Plan
 {
-    /** @brief The paths to extrude, scaled, in the frame of SurfaceInfo::region. */
+    /**
+     * @brief The paths to extrude, scaled, in the frame of SurfaceInfo::region.
+     *
+     * **May be empty, and then the slicer's own paths are kept** and only the flow and the
+     * speed below are applied to them. A strategy that wants the lines the slicer would have
+     * laid, printed differently - thinner over a deck that is about to warp, slower over a
+     * bridge - would otherwise have to regenerate every line, which costs the links between
+     * them and about a sixth of the material in travel.
+     */
     Domain::Polylines paths;
     /**
      * @brief Multiplies the extrusion the slicer computed for this surface.

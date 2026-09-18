@@ -151,6 +151,7 @@ public:
         argument["density"] = surface.density;
         argument["mm3_per_mm"] = surface.mm3_per_mm;
         argument["external"] = surface.external;
+        argument["variable_width"] = surface.variable_width;
         argument["bridge_angle"] = surface.bridge_angle;
         argument["contour"] = contour_to_lua(lua, surface.region.contour);
 
@@ -193,24 +194,35 @@ private:
      *
      * Two shapes are accepted. A plain list of paths is filled at the flow the slicer
      * worked out, which is what a planner keeping the stock line spacing wants. A table
-     * carrying the paths under `paths` may also name a `flow_ratio` for them.
+     * carrying the paths under `paths` may also name a `flow_ratio` and a `speed` for them,
+     * and a table naming those but no paths keeps the slicer's own lines and changes only how
+     * they are printed.
      */
     static std::optional<FillPlanner::Plan> to_plan(const sol::table& answer)
     {
         const sol::object paths_field = answer["paths"];
-        if (paths_field.get_type() == sol::type::none
-            || paths_field.get_type() == sol::type::nil) {
-            std::optional<Domain::Polylines> paths = to_polylines(answer);
-            if (!paths.has_value()) {
+        const bool names_paths = paths_field.get_type() != sol::type::none
+            && paths_field.get_type() != sol::type::nil;
+        const bool names_flow = answer["flow_ratio"].get_type() != sol::type::none
+            && answer["flow_ratio"].get_type() != sol::type::nil;
+        const bool names_speed = answer["speed"].get_type() != sol::type::none
+            && answer["speed"].get_type() != sol::type::nil;
+
+        std::optional<Domain::Polylines> paths;
+        if (names_paths) {
+            if (paths_field.get_type() != sol::type::table) {
                 return std::nullopt;
             }
-            return FillPlanner::Plan{std::move(*paths)};
+            paths = to_polylines(paths_field.as<sol::table>());
+        } else if (names_flow || names_speed) {
+            // "Lay your own lines, printed differently." The slicer keeps its paths and only
+            // the flow and the speed below are applied, which is what a strategy wanting a
+            // thinner deck or a slower bridge needs and all it needs.
+            paths = Domain::Polylines{};
+        } else {
+            // A bare list of paths, the common answer.
+            paths = to_polylines(answer);
         }
-        if (paths_field.get_type() != sol::type::table) {
-            return std::nullopt;
-        }
-
-        std::optional<Domain::Polylines> paths = to_polylines(paths_field.as<sol::table>());
         if (!paths.has_value()) {
             return std::nullopt;
         }
