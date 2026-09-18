@@ -86,6 +86,16 @@ public:
     [[nodiscard]] const ExPolygons&                 fill_expolygons() const { return m_fill_expolygons; }
     /** @brief Perimeters a PerimeterPlanner added here beyond the settings' count. */
     [[nodiscard]] unsigned                          planned_extra_perimeters() const { return m_planned_extra_perimeters; }
+
+    /**
+     * @brief Whether a PerimeterPlanner asked for the bridges here to be straight spans only.
+     *
+     * Set when the planner asked for what hangs over air to be left to the fill stage. A ring
+     * of material round a hole cannot be bridged: the lines that would cross the hole are cut
+     * in half by it and each half stops in mid-air, so the fill stage keeps only the pieces
+     * that reach held-up material at both ends.
+     */
+    [[nodiscard]] bool                              planned_bridge_spans_only() const { return m_planned_bridge_spans_only; }
     // and their bounding boxes
     [[nodiscard]] const BoundingBoxes&              fill_expolygons_bboxes() const { return m_fill_expolygons_bboxes; }
     // Storage for fill regions produced for a single LayerIsland, of which infill splits into multiple islands.
@@ -190,6 +200,8 @@ private:
     // on the layers that do not have it - which is exactly the thing the extra wall was added
     // to avoid, since it welds the alternation back into one continuous face.
     unsigned                    m_planned_extra_perimeters{0};
+    // Whether a PerimeterPlanner asked for the bridges here to be straight spans only.
+    bool                        m_planned_bridge_spans_only{false};
 
     // Unspecified fill polygons, used for overhang detection ("ensure vertical wall thickness feature")
     // and for re-starting of infills.
