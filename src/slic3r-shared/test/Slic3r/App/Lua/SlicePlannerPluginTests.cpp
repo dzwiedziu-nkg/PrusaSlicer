@@ -77,6 +77,73 @@ TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a bare number is the growt
     REQUIRE(planned.clip->max_overhang_width == 0.);
 }
 
+TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a remedy of cap asks for the third pass")
+{
+    const Strategy planner = planner_for(R"(
+        function plan_slice(layer)
+            return {max_overhang = 0.3, max_overhang_width = 10.0, remedy = "cap"}
+        end
+    )");
+    REQUIRE(static_cast<bool>(planner));
+
+    const auto planned = planner(layer());
+    REQUIRE(planned.cap.has_value());
+    REQUIRE(planned.cap->max_overhang == 0.3);
+    REQUIRE(planned.cap->max_overhang_width == 10.0);
+    REQUIRE_FALSE(planned.clip.has_value());
+    REQUIRE_FALSE(planned.fill.has_value());
+}
+
+TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a layer may ask for all three remedies")
+{
+    const Strategy planner = planner_for(R"(
+        function plan_slice(layer)
+            return {
+                {max_overhang = 0.2, max_overhang_width = 2.0, remedy = "clip"},
+                {max_overhang = 0.3, remedy = "fill"},
+                {max_overhang = 0.4, max_overhang_width = 8.0, remedy = "cap"}
+            }
+        end
+    )");
+    REQUIRE(static_cast<bool>(planner));
+
+    const auto planned = planner(layer());
+    REQUIRE(planned.clip.has_value());
+    REQUIRE(planned.clip->max_overhang == 0.2);
+    REQUIRE(planned.fill.has_value());
+    REQUIRE(planned.fill->max_overhang == 0.3);
+    REQUIRE(planned.cap.has_value());
+    REQUIRE(planned.cap->max_overhang == 0.4);
+    REQUIRE(planned.cap->max_overhang_width == 8.0);
+}
+
+TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] two caps for one layer are refused")
+{
+    const Strategy planner = planner_for(R"(
+        function plan_slice(layer)
+            return {
+                {max_overhang = 0.3, remedy = "cap"},
+                {max_overhang = 0.4, remedy = "cap"}
+            }
+        end
+    )");
+    REQUIRE(static_cast<bool>(planner));
+
+    REQUIRE(planner(layer()).empty());
+}
+
+TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a remedy that is not one of the three is refused")
+{
+    const Strategy planner = planner_for(R"(
+        function plan_slice(layer)
+            return {max_overhang = 0.3, remedy = "drill"}
+        end
+    )");
+    REQUIRE(static_cast<bool>(planner));
+
+    REQUIRE(planner(layer()).empty());
+}
+
 TEST_CASE_METHOD(PluginFixture, "[SlicePlannerPlugin] a table may name both distances")
 {
     const Strategy planner = planner_for(R"(
