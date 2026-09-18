@@ -55,9 +55,9 @@ Here is an example of bundled plugin manifest:
 ```
 
 The recognized `required_apis` keys are `project.plugin`, `slicing.island_order`,
-`slicing.island_sequence`, `slicing.extrusion_filter`, `slicing.fill_planner` and
-`slicing.pass_planner`, `slicing.perimeter_planner` and `slicing.resume_planner`, all at
-version `1.0.0`.
+`slicing.island_sequence`, `slicing.extrusion_filter`, `slicing.fill_planner`,
+`slicing.loop_direction` and `slicing.pass_planner`, `slicing.perimeter_planner` and
+`slicing.resume_planner`, all at version `1.0.0`.
 
 This is list of recognized `manifest.json` fields. 
 
@@ -82,8 +82,9 @@ The table `info` describes plugin with following keys:
 - `id` (string) plugin unique identifier, recommended is reverse domain name like notation
 - `type` (string) type of plugin, allowed values are `'project.plugin'`,
   `'slicing.island_order'`, `'slicing.island_sequence'`, `'slicing.extrusion_filter'`,
-  `'slicing.fill_planner'`, `'slicing.pass_planner'`, `'slicing.perimeter_planner'`,
-  `'slicing.resume_planner'` and `'slicing.object_labels'`.
+  `'slicing.fill_planner'`, `'slicing.loop_direction'`, `'slicing.pass_planner'`,
+  `'slicing.perimeter_planner'`, `'slicing.resume_planner'`, `'slicing.slice_planner'` and
+  `'slicing.object_labels'`.
 - `title` (string) displayed plugin name
 - `menu` (string) menu item path to register the plugin under _Plugins_ menu item (e.g. `Calibration/My cool pattern`).
   Only used by `project.plugin`.
@@ -387,6 +388,79 @@ serialized G-code stage, `plan_fill()` is reached from the slicer's parallel inf
 once per surface across all layers at once. Calls are serialized on the way into Lua, so a
 plugin does not have to be thread safe, but a plugin that answers for every surface of a
 large print will hold that stage up. Claim only the surfaces you can improve.
+
+### `slicing.loop_direction`
+
+Given a closed wall loop about to be written to G-code, decide which way round it is walked.
+
+Every perimeter is a closed loop and the nozzle has to go round it one way or the other. The
+slicer walks all of them the same way - counter clockwise seen from above, or clockwise for the
+whole print when the printer's `prefer_clockwise_movements` is set - and that is the only
+control there is over it.
+
+Which way round is not always a matter of indifference. The case that motivated the hook is
+OrcaSlicer's `overhang_reverse`: on a wall laid over air, alternating the direction every other
+layer leaves consecutive layers pulling against each other as they cool rather than all the same
+way, which improves steep overhangs and takes stress out of a warping part.
+
+```lua
+info = {
+    id = "reverse_on_even",
+    type = "slicing.loop_direction"
+}
+
+function plan_direction(loop)
+    -- loop = {
+    --     layer_id          = <integer>,
+    --     print_z           = <mm>,
+    --     extruder_id       = <integer>,
+    --     role              = <string>,   -- "ExternalPerimeter" or "Perimeter"
+    --     perimeter_index   = <integer>,  -- 0 is the outermost, -1 if the slicer recorded none
+    --     is_hole           = <boolean>,  -- the loop runs round a hole, not round the outside
+    --     length            = <mm>,
+    --     overhang_length   = <mm>,       -- of this loop, laid over air
+    --     island_overhang   = <mm>,       -- summed over every loop of this island
+    --     default_direction = <string>    -- "cw" or "ccw", what the slicer would do
+    -- }
+    if loop.layer_id % 2 == 1 and loop.island_overhang > 0.0 then
+        return loop.default_direction == "ccw" and "cw" or "ccw"
+    end
+    return nil                             -- walk it the way the slicer chose
+end
+```
+
+The answer is `"cw"`, `"ccw"`, a table naming `direction`, or `nil`. **Answering with
+`default_direction` is the same as declining.** Anything else is refused, reported once, and the
+stock direction is used for the rest of the export.
+
+This is the direction the nozzle travels, not the orientation the loop is stored with: the
+engine reverses the stored loop when the two disagree, exactly as it already does for
+`prefer_clockwise_movements`, so the seam, the wipe and the smoothed path all follow. Nothing is
+added or removed by an answer here - the same loop is printed with the same material, in the
+opposite order of points.
+
+`overhang_length` is how much of the loop lies outside the outline of the layer below, measured
+against that outline as it is and with no allowance for the width of the bead. That is the same
+test OrcaSlicer's `overhang_reverse` makes at its default threshold, where their
+`threshold − ½ line width` works out to exactly zero.
+
+It is deliberately **not** the slicer's own overhang perimeter marking, which compares the loop
+against the layer below grown by half a nozzle and therefore says no on any slope the nozzle
+still partly overlaps — on a 31° wall at 0.2 mm layers, nothing is ever marked although
+OrcaSlicer reverses every layer of it. It also does not depend on `overhangs` being enabled in
+the print settings, which that marking does.
+
+**It is a length, not a depth.** A plugin wanting OrcaSlicer's non-default thresholds, which
+move the outline the loop is compared against rather than the amount required, cannot have them
+through this field.
+
+`island_overhang` is offered because the decision is usually about the island rather than the
+loop: a wall stack whose outermost loop hangs over air wants all of its loops turned together,
+and a plugin asked one loop at a time could not otherwise know.
+
+Called from the serialized G-code stage, one loop at a time and in layer order, so unlike the
+fill, pass and perimeter planners a strategy here needs no lock of its own - and may carry state
+from one layer to the next.
 
 ### `slicing.perimeter_planner`
 

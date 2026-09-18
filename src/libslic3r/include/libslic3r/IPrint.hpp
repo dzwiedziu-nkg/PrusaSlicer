@@ -13,6 +13,7 @@
 #include "libslic3r/Fill/FillPlanner.hpp"
 #include "libslic3r/GCode/IslandOrdering.hpp"
 #include "libslic3r/GCode/IslandSequencing.hpp"
+#include "libslic3r/GCode/LoopDirection.hpp"
 #include "libslic3r/GCode/ObjectLabels.hpp"
 #include "libslic3r/IThumbnailImageGenerator.hpp"
 #include "libslic3r/PassPlanner.hpp"
@@ -138,6 +139,14 @@ public:
      * and unlike the fill, pass and perimeter planners never concurrently.
      */
     SlicePlanner::Strategy slice_planner;
+
+    /**
+     * Optionally decides which way round a closed wall loop is walked, asked about every
+     * perimeter loop during G-code export. Empty by default, which walks them all the way the
+     * printer's prefer_clockwise_movements says. See GCode::LoopDirection - called from the
+     * serialized G-code stage, in layer order, so a strategy may carry state between layers.
+     */
+    GCode::LoopDirection::Strategy loop_direction_strategy;
 
     /**
      * Optionally schedules connected islands across layer boundaries. Empty by
