@@ -86,6 +86,81 @@ void LayerRegion::slices_to_fill_surfaces_clipped()
     }
 }
 
+namespace {
+
+/**
+ * @brief Splits one surface into the part that gets walls and the part that goes to the fill.
+ *
+ * The slicer walls a region whether or not the layer below holds it up. Where a hole narrows -
+ * a counterbore - that means both loops of the smaller hole's wall are laid in mid-air, going
+ * round nothing; the ring of material they sit on is bridged either way. A plugin may ask for
+ * that part to be cut out of what the perimeter generator sees and handed to the fill stage
+ * instead, which is what OrcaSlicer's partially bridged counterbore mode does.
+ *
+ * The cut takes a band of held-up material with it, so the bridge has ends to rest on, and the
+ * wall then runs round the outside of that band on material that is supported.
+ *
+ * @param walled out: the pieces the perimeter generator is to be given, left empty when there
+ *        is nothing to cut out and the surface should go to it whole.
+ * @return the area to hand to the fill stage, empty when nothing is to be cut out.
+ */
+ExPolygons unsupported_to_fill(
+    const Surface                       &surface,
+    const ExPolygons                    *lower_slices,
+    const PerimeterPlanner::Unsupported  policy,
+    const float                          anchor,
+    const float                          min_width,
+    ExPolygons                          &walled)
+{
+    // The first layer rests on the bed, so nothing of it hangs over anything.
+    if (policy == PerimeterPlanner::Unsupported::Wall || lower_slices == nullptr) {
+        return {};
+    }
+
+    const ExPolygons whole{ surface.expolygon };
+    ExPolygons unsupported = diff_ex(whole, *lower_slices);
+    if (unsupported.empty()) {
+        return {};
+    }
+    // A sliver narrower than a wall is not worth cutting a wall out for, and every sloping face
+    // of every part has one along it.
+    unsupported = opening_ex(unsupported, 0.5f * min_width);
+    if (unsupported.empty()) {
+        return {};
+    }
+
+    if (policy == PerimeterPlanner::Unsupported::FillHoles) {
+        if (surface.expolygon.holes.empty()) {
+            return {};
+        }
+        // The surface's holes as filled discs: its outline less itself.
+        const ExPolygons holes =
+            diff_ex(ExPolygons{ ExPolygon{ surface.expolygon.contour } }, whole);
+        ExPolygons touching;
+        for (ExPolygon &piece : unsupported) {
+            if (! intersection_ex(offset_ex(piece, min_width), holes).empty()) {
+                touching.emplace_back(std::move(piece));
+            }
+        }
+        unsupported = std::move(touching);
+        if (unsupported.empty()) {
+            return {};
+        }
+    }
+
+    ExPolygons carve = intersection_ex(whole, offset_ex(unsupported, anchor));
+    ExPolygons rest  = diff_ex(whole, carve);
+    if (rest.empty()) {
+        // The whole region would go unwalled. That is a different thing from bridging a step in
+        // a hole, and it is not what the plugin asked for, so leave the region as it was.
+        return {};
+    }
+    walled = std::move(rest);
+    return carve;
+}
+
+} // namespace
+
 // Produce perimeter extrusions, gap fill extrusions and fill polygons for input slices.
 void LayerRegion::make_perimeters(
     // Input slices for which the perimeters, gap fills and fill expolygons are to be generated.
@@ -132,8 +207,13 @@ void LayerRegion::make_perimeters(
 
     // A plugin may want a different wall count here than the settings carry - one more on
     // alternate layers, say, so the infill's anchors alternate between two radii and it ends
-    // up wedged between walls instead of always meeting the same seam. Asked before anything
-    // is generated from the count, and silent when no plugin is installed.
+    // up wedged between walls instead of always meeting the same seam. It may also ask for the
+    // part of the region that hangs over air to be left to the fill stage rather than walled in
+    // mid-air. Asked before anything is generated from either, and silent when no plugin is
+    // installed.
+    PerimeterPlanner::Unsupported unsupported_policy = PerimeterPlanner::Unsupported::Wall;
+    float unsupported_anchor = 0.f;
+    float min_unsupported = 0.f;
     if (const PerimeterPlanner::Strategy &planner =
             this->layer()->object()->print()->perimeter_planner; planner) {
         if (const int perimeter_extruder = region_config.get<int>("perimeter_extruder") - 1;
@@ -154,6 +234,14 @@ void LayerRegion::make_perimeters(
                 params.perimeters_override = plan->perimeters;
                 m_planned_extra_perimeters = plan->perimeters > info.perimeters ?
                     unsigned(plan->perimeters - info.perimeters) : 0u;
+                unsupported_policy = plan->unsupported;
+                // A zero asks the slicer for its own answer, which is one perimeter spacing:
+                // an anchor narrower than a wall is not an anchor, and a sliver narrower than a
+                // wall is not worth cutting out of one.
+                unsupported_anchor = scaled<float>(plan->unsupported_anchor > 0. ?
+                    plan->unsupported_anchor : flow.spacing());
+                min_unsupported = scaled<float>(plan->min_unsupported > 0. ?
+                    plan->min_unsupported : flow.spacing());
             }
         }
     }
@@ -164,15 +252,16 @@ void LayerRegion::make_perimeters(
     // Cache for offsetted lower_slices
     Polygons          lower_layer_polygons_cache;
 
-    for (const Surface &surface : slices) {
-        auto perimeters_begin      = uint32_t(m_perimeters.size());
-        auto gap_fills_begin       = uint32_t(m_thin_fills.size());
-        auto fill_expolygons_begin = uint32_t(fill_expolygons.size());
-        if (this->layer()->object()->config().get<Domain::PerimeterGeneratorType>("perimeter_generator") == Domain::PerimeterGeneratorType::Arachne && !spiral_vase)
+    const bool arachne =
+        this->layer()->object()->config().get<Domain::PerimeterGeneratorType>("perimeter_generator")
+            == Domain::PerimeterGeneratorType::Arachne && !spiral_vase;
+
+    const auto generate = [&](const Surface &to_wall) {
+        if (arachne)
             PerimeterGenerator::process_arachne(
                 // input:
                 params,
-                surface,
+                to_wall,
                 lower_slices,
                 upper_slices,
                 lower_layer_polygons_cache,
@@ -184,7 +273,7 @@ void LayerRegion::make_perimeters(
             PerimeterGenerator::process_classic(
                 // input:
                 params,
-                surface,
+                to_wall,
                 lower_slices,
                 upper_slices,
                 lower_layer_polygons_cache,
@@ -192,6 +281,31 @@ void LayerRegion::make_perimeters(
                 m_perimeters,
                 m_thin_fills,
                 fill_expolygons);
+    };
+
+    for (const Surface &surface : slices) {
+        auto perimeters_begin      = uint32_t(m_perimeters.size());
+        auto gap_fills_begin       = uint32_t(m_thin_fills.size());
+        auto fill_expolygons_begin = uint32_t(fill_expolygons.size());
+
+        // A plugin may want part of this surface left to the fill stage rather than walled.
+        // `walled` comes back empty when there is nothing to cut out, which is every surface of
+        // every ordinary print, and then the surface goes to the generator as it always did.
+        ExPolygons walled;
+        ExPolygons to_fill =
+            unsupported_to_fill(surface, lower_slices, unsupported_policy, unsupported_anchor,
+                min_unsupported, walled);
+        if (walled.empty()) {
+            generate(surface);
+        } else {
+            for (const ExPolygon &piece : walled)
+                generate(Surface{ surface, piece });
+            // The area nobody walled still has to be printed, and it keeps the surface type its
+            // slice already carries - over air that is a bridge - so handing it to the fill
+            // stage is the whole of what "do not wall this" means.
+            append(fill_expolygons, std::move(to_fill));
+        }
+
         perimeter_and_gapfill_ranges.emplace_back(
             ExtrusionRange{ perimeters_begin, uint32_t(m_perimeters.size()) }, 
             ExtrusionRange{ gap_fills_begin,  uint32_t(m_thin_fills.size()) });

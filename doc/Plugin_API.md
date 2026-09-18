@@ -491,9 +491,43 @@ end
 the settings ask for here - and `perimeter_width`, `perimeter_spacing` and `nozzle_diameter`.
 
 The answer is a wall count, or a table naming `perimeters`, or `nil` to leave the settings'
-count alone. Answering with the count it was handed is the same as declining. A count outside
-0 to 100 is clamped; the upper bound is not a physical limit but a guard, since a count that
-runs away fills the part with wall and takes the slice with it.
+count alone. Answering with the count it was handed, and nothing else, is the same as declining.
+A count outside 0 to 100 is clamped; the upper bound is not a physical limit but a guard, since
+a count that runs away fills the part with wall and takes the slice with it.
+
+#### The part of a region that hangs over air
+
+The slicer walls a region whether or not the layer below holds it up. Where a hole narrows - a
+counterbore is the case - the ring of material left round the smaller hole is walled in mid-air,
+both loops of it, going round nothing, although the ring itself is bridged. A plugin may ask for
+that part to be left to the fill stage instead:
+
+```lua
+function plan_perimeters(region)
+    return {
+        unsupported = "fill_holes",   -- or "fill_all", or "wall" (the default)
+        unsupported_anchor = 0.0,     -- mm, 0 asks the slicer for one perimeter spacing
+        min_unsupported = 0.0         -- mm, 0 asks the slicer for one perimeter spacing
+    }
+end
+```
+
+- **`"wall"`** is the stock slicer: wall it like anything else.
+- **`"fill_holes"`** cuts out the unsupported material that touches a hole of the region, along
+  with a band of held-up material beside it, and hands both to the fill stage. The wall then
+  runs round the outside of that band, on material the layer below holds up, and the bridge has
+  ends to rest on. This is OrcaSlicer's `counterbore_hole_bridging` in its partially bridged
+  mode.
+- **`"fill_all"`** does the same wherever a region hangs over air, hole or no hole. That is a
+  much bigger change of behaviour and is the setting to reach for last.
+
+The area handed over keeps the surface type its slice already carries, so over air it is filled
+as a bridge and the slicer's own bridge anchoring applies to it. `min_unsupported` drops slivers
+- without it every sloping face in the part would have one cut out of its wall. If the cut would
+take the whole region, nothing is cut and it is walled as usual.
+
+A table naming `unsupported` but not `perimeters` keeps the settings' count, which is not the
+same as declining.
 
 Zero is allowed and means a layer with no wall, which the slicer already supports. A region the
 settings gave no wall at all is one the slicer is treating specially - spiral vase, or a
