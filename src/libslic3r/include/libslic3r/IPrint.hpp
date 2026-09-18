@@ -13,6 +13,7 @@
 #include "libslic3r/Fill/FillPlanner.hpp"
 #include "libslic3r/GCode/IslandOrdering.hpp"
 #include "libslic3r/GCode/IslandSequencing.hpp"
+#include "libslic3r/GCode/LayerPlanner.hpp"
 #include "libslic3r/GCode/LoopDirection.hpp"
 #include "libslic3r/GCode/ObjectLabels.hpp"
 #include "libslic3r/IThumbnailImageGenerator.hpp"
@@ -147,6 +148,14 @@ public:
      * serialized G-code stage, in layer order, so a strategy may carry state between layers.
      */
     GCode::LoopDirection::Strategy loop_direction_strategy;
+
+    /**
+     * Optionally decides the order a layer's groups of extrusion are printed in - the walls of
+     * an island and the runs of its fill. Empty by default, which prints them island by island
+     * in the order the settings name. See GCode::LayerPlanner - called from the serialized
+     * G-code stage, in layer order, so a strategy may carry state between layers.
+     */
+    GCode::LayerPlanner::Strategy layer_planner;
 
     /**
      * Optionally schedules connected islands across layer boundaries. Empty by

@@ -56,8 +56,9 @@ Here is an example of bundled plugin manifest:
 
 The recognized `required_apis` keys are `project.plugin`, `slicing.island_order`,
 `slicing.island_sequence`, `slicing.extrusion_filter`, `slicing.fill_planner`,
-`slicing.loop_direction` and `slicing.pass_planner`, `slicing.perimeter_planner` and
-`slicing.resume_planner`, all at version `1.0.0`.
+`slicing.layer_planner`, `slicing.loop_direction`, `slicing.pass_planner`,
+`slicing.perimeter_planner`, `slicing.resume_planner`, `slicing.slice_planner` and
+`slicing.object_labels`.
 
 This is list of recognized `manifest.json` fields. 
 
@@ -82,7 +83,8 @@ The table `info` describes plugin with following keys:
 - `id` (string) plugin unique identifier, recommended is reverse domain name like notation
 - `type` (string) type of plugin, allowed values are `'project.plugin'`,
   `'slicing.island_order'`, `'slicing.island_sequence'`, `'slicing.extrusion_filter'`,
-  `'slicing.fill_planner'`, `'slicing.loop_direction'`, `'slicing.pass_planner'`,
+  `'slicing.fill_planner'`, `'slicing.layer_planner'`, `'slicing.loop_direction'`,
+  `'slicing.pass_planner'`,
   `'slicing.perimeter_planner'`, `'slicing.resume_planner'`, `'slicing.slice_planner'` and
   `'slicing.object_labels'`.
 - `title` (string) displayed plugin name
@@ -408,6 +410,72 @@ serialized G-code stage, `plan_fill()` is reached from the slicer's parallel inf
 once per surface across all layers at once. Calls are serialized on the way into Lua, so a
 plugin does not have to be thread safe, but a plugin that answers for every surface of a
 large print will hold that stage up. Claim only the surfaces you can improve.
+
+### `slicing.layer_planner`
+
+Given the groups of extrusion a layer falls into, decide the order they are printed in.
+
+A layer is printed island by island, and each island's walls and fill in the order one print
+setting - `infill_first` - names for the whole object. The case that motivated the hook is the
+Benchy hull line: Prusa found by hand in the G-code that **printing the deck before the rest of
+the layer** helps, because the wall running past it is then laid at a distance in time from the
+mass of solid beside it. There was no way to ask for that.
+
+```lua
+info = {
+    id = "hull_line_order",
+    type = "slicing.layer_planner"
+}
+
+function plan_layer(layer)
+    -- layer = {
+    --     layer_id    = <integer>,
+    --     print_z     = <mm>,
+    --     extruder_id = <integer>,
+    --     groups = {
+    --         {
+    --             island = <integer>,   -- 1-based, in the order the islands are printed
+    --             kind   = <string>,    -- "perimeters" or "fill"
+    --             role   = <string>,    -- the role carrying most of the group's length
+    --             length = <mm>,
+    --             volume = <mm3>,
+    --             bbox   = {min_x = <mm>, min_y = <mm>, max_x = <mm>, max_y = <mm>},
+    --             roles  = {[<role>] = {length = <mm>, volume = <mm3>}, ...}
+    --         }, ...
+    --     }
+    -- }
+    -- return a list of positions into layer.groups, 1-based, or nil
+end
+```
+
+A **group** is the wall loops of one island, or one run of its fill - a run being the part of it
+that belongs to one region. The engine can print those in any order, including a group of one
+island between two groups of another, because each becomes its own entry in what the G-code
+writer is handed.
+
+The answer is a permutation of `1..#groups`, each position exactly once, or `nil` to keep the
+order the slicer chose. Anything else is refused and the stock order is used for that layer, so a
+broken plugin can never lose an extrusion. **Answering with the stock order is the same as
+declining**, and takes the same code path, so a plugin that only acts on some layers leaves the
+others bit for bit as they were.
+
+Two things to know about a group's `role`. A group may carry more than one, and then `role` is
+the one with the most length: `roles` is the whole answer, keyed by role name, and a role the
+group has none of is simply absent. **This matters more than it sounds.** Where a deck starts
+inside a part, its solid infill and the sparse infill round it belong to one region and therefore
+to one run, and the sparse is the longer of them - so a plugin reading only `role` sees no solid
+infill at all on the very layer where it appears. The second thing is that the walls of an island
+are one group: the external and the internal perimeters are not separable here, because the
+slicer prints them as a stack and the seam of each is chosen against the last.
+
+`plan_layer()` is asked once per island cluster of a layer - a layer that falls into disjoint
+pieces has each piece planned separately, since the order of the pieces themselves is
+`slicing.island_order`'s question.
+
+Called from the serialized G-code stage, in layer order, so a strategy here needs no lock of its
+own **and may carry state from one layer to the next** - which is the only way to notice that
+this layer is where the part changes. The fill planner cannot: it is asked about every layer at
+once.
 
 ### `slicing.loop_direction`
 
