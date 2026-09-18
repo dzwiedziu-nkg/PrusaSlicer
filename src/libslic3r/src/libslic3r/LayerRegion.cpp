@@ -100,11 +100,9 @@ namespace {
  * The cut takes a band of held-up material with it, so the bridge has ends to rest on, and the
  * wall then runs round the outside of that band on material that is supported.
  *
- * What is filled is not the whole of the unsupported area but the part of it a straight line
- * can cross with an anchor at each end, which BridgeDetector works out. Round a counterbore the
- * difference is the two lobes beside the hole: every line there runs from the outer edge to the
- * hole's rim and stops in mid-air, and the filler joins those stubs with hops over the opening.
- * They are dropped - not walled either, since a wall round them would hang in the same air.
+ * The whole unsupported area goes over, not only the part that can be spanned: which of the
+ * lines laid over it are worth printing is decided in the fill stage, where they exist. See
+ * keep_anchored_spans() in Fill/Fill.cpp.
  *
  * @param walled out: the pieces the perimeter generator is to be given, left empty when there
  *        is nothing to cut out and the surface should go to it whole.
@@ -154,30 +152,12 @@ ExPolygons unsupported_to_fill(
         }
     }
 
-    // Only the part that can be crossed by a straight line anchored at both ends is worth
-    // filling. Round a counterbore the rest is the two lobes beside the hole, where every line
-    // runs from the outer edge to the hole's rim and stops in mid-air, and the filler joins
-    // those stubs to each other with hops over the opening. Neither is a bridge.
-    //
-    // BridgeDetector answers exactly that question - it is what the slicer uses to choose a
-    // bridge's direction, and its coverage() keeps the trapezoids with support on two sides.
-    // It is documented as slow, which is why it runs last, after the cheap tests have thrown
-    // out the slivers along every sloping wall in the part.
-    BridgeDetector detector{ unsupported, *lower_slices, coord_t(min_width * 2.f) };
-    if (! detector.detect_angle()) {
-        return {};
-    }
-    // Taken as it comes. An opening here to drop the wedges along a tangent to the hole was
-    // tried and rejected: it changed nothing on a Ø12 counterbore and wiped out the mask
-    // altogether on a Ø6 one, where the whole ring is only a millimetre and a half wide.
-    const ExPolygons bridgeable = union_ex(detector.coverage());
-    if (bridgeable.empty()) {
-        return {};
-    }
-
-    // Everything unsupported leaves the wall stage, including what will not be filled: a wall
-    // round the part that cannot be bridged is a wall in mid-air, which is the thing being
-    // removed.
+    // The whole of it leaves the wall stage, with a band of held-up material beside it for the
+    // bridge to be anchored on. Which of the lines laid over it are worth printing is decided
+    // where they are laid, not here: a ring cannot be bridged, and the lines that would cross
+    // the hole are dropped in the fill stage rather than the area being whittled down to fit
+    // them. Cutting the area instead was tried and is worse - it moves the wall further out and
+    // leaves the layer above spanning what was cut.
     const ExPolygons carve = intersection_ex(whole, offset_ex(unsupported, anchor));
     ExPolygons rest = diff_ex(whole, carve);
     if (rest.empty()) {
@@ -186,14 +166,7 @@ ExPolygons unsupported_to_fill(
         return {};
     }
     walled = std::move(rest);
-
-    // What goes to the fill is the bridgeable part and a band of held-up material for it to be
-    // anchored on. The band is taken from the supported side only: grown in every direction it
-    // would reach back over the lobes the coverage test just threw out, and the stubs and the
-    // hops over the opening would come back with them.
-    const ExPolygons supported = diff_ex(whole, unsupported);
-    const ExPolygons band = intersection_ex(supported, offset_ex(bridgeable, anchor));
-    return intersection_ex(whole, union_ex(bridgeable, band));
+    return carve;
 }
 
 } // namespace
@@ -215,6 +188,7 @@ void LayerRegion::make_perimeters(
     m_perimeters.clear();
     m_thin_fills.clear();
     m_planned_extra_perimeters = 0;
+    m_planned_bridge_spans_only = false;
 
     perimeter_and_gapfill_ranges.reserve(perimeter_and_gapfill_ranges.size() + slices.size());
     // There may be more expolygons produced per slice, thus this reserve is conservative.
@@ -272,6 +246,7 @@ void LayerRegion::make_perimeters(
                 m_planned_extra_perimeters = plan->perimeters > info.perimeters ?
                     unsigned(plan->perimeters - info.perimeters) : 0u;
                 unsupported_policy = plan->unsupported;
+                m_planned_bridge_spans_only = plan->unsupported != PerimeterPlanner::Unsupported::Wall;
                 // A zero asks the slicer for its own answer, which is one perimeter spacing:
                 // an anchor narrower than a wall is not an anchor, and a sliver narrower than a
                 // wall is not worth cutting out of one.

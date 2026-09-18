@@ -137,6 +137,45 @@ struct SurfaceFillParams
 	}
 };
 
+/**
+ * @brief Keeps the pieces of @p src that reach held-up material at both ends.
+ *
+ * A ring of material round a hole cannot be bridged. The lines that pass beside the hole cross
+ * it from one edge to the other and are held at both ends, but the lines that would pass
+ * through it are cut in half by the hole: each half runs from the outer edge to the rim and
+ * stops in mid-air, and the filler then joins those stubs to each other with short hops over
+ * the opening. This drops both, and keeps the hops that run along the anchor, where there is
+ * something underneath them.
+ *
+ * Asked for by a PerimeterPlanner - see LayerRegion::planned_bridge_spans_only() - and applied
+ * to bridges only, where "in mid-air" means anything at all.
+ */
+static Polylines keep_anchored_spans(const Polylines &src, const ExPolygons &supported)
+{
+    namespace ExPolygonAlgo = Slic3r::Biz::Algorithms::ExPolygon;
+
+    Polylines out;
+    for (const Polyline &polyline : src) {
+        bool joining = false;
+        for (size_t i = 1; i < polyline.points.size(); ++ i) {
+            const Point &from = polyline.points[i - 1];
+            const Point &to   = polyline.points[i];
+            if (! ExPolygonAlgo::contains(supported, from) || ! ExPolygonAlgo::contains(supported, to)) {
+                // One end of this piece is over nothing.
+                joining = false;
+                continue;
+            }
+            if (joining) {
+                out.back().points.emplace_back(to);
+            } else {
+                out.emplace_back(Polyline{ from, to });
+                joining = true;
+            }
+        }
+    }
+    return out;
+}
+
 struct SurfaceFill {
 	SurfaceFill(const SurfaceFillParams& params) : region_id(size_t(-1)), surface(stCount, ExPolygon()), params(params) {}
 
@@ -590,6 +629,14 @@ void Layer::make_fills(FillAdaptive::Octree* adaptive_fill_octree, FillAdaptive:
                 polylines             = std::move(plan.paths);
                 planned_flow_ratio    = plan.flow_ratio;
                 planned_speed         = plan.speed;
+            }
+            // A plugin may have asked for this region's bridges to be straight spans only,
+            // which is what it takes to bridge the ring round a counterbore without laying
+            // anything into the opening. Applied last, to whatever is about to be printed.
+            if (surface_fill.params.bridge && !polylines.empty() && this->lower_layer != nullptr
+                && surface_fill.region_id < this->region_count()
+                && this->get_region(int(surface_fill.region_id))->planned_bridge_spans_only()) {
+                polylines = keep_anchored_spans(polylines, this->lower_layer->lslices);
             }
             if (!polylines.empty() || !thick_polylines.empty()) {
                 // calculate actual flow from spacing (which might have been adjusted by the infill
