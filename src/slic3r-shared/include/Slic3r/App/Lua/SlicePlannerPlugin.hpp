@@ -19,8 +19,9 @@ constexpr auto SLICE_PLANNER_API_VERSION = "1.3.0";
  * returns a strategy that forwards to its @c plan_slice() function. Returns an empty strategy
  * when no such plugin is installed, which prints the outline the mesh gives.
  *
- * Layers are offered to the planner one at a time and never concurrently, so unlike the fill,
- * pass and perimeter planners the returned strategy needs no lock.
+ * Layers of one object are offered in order and one at a time, but Print::process() slices the
+ * objects of a plate in parallel, so the returned strategy serializes access to its Lua state
+ * with a mutex. Two objects and a plugin installed used to be a crash.
  */
 SlicePlanner::Strategy make_slice_planner(const std::vector<std::string>& plugin_paths);
 
