@@ -138,6 +138,34 @@ struct SurfaceFillParams
 };
 
 /**
+ * @brief Applies a planner's flow ratio and speed to paths whose width varies along them.
+ *
+ * The classic filler builds its extrusions from a Flow, so a ratio is folded into that before
+ * they are made. The Arachne-based one takes the width from the thick polyline, point by point,
+ * and there is nothing to fold it into - so it is applied here, to each piece, the same way:
+ * the cross section follows the ratio and the width with it, as its square root for a bridge,
+ * which is a round strand, and linearly for a rectangular extrusion.
+ */
+static void apply_planned_flow(
+    ExtrusionMultiPath &multi_path, const double flow_ratio, const double speed, const bool bridge)
+{
+    if (flow_ratio == 1. && speed <= 0.) {
+        return;
+    }
+    const double width_ratio = bridge ? std::sqrt(flow_ratio) : flow_ratio;
+    for (ExtrusionPath &path : multi_path.paths) {
+        ExtrusionAttributes attributes = path.attributes();
+        attributes.mm3_per_mm *= flow_ratio;
+        attributes.width = float(double(attributes.width) * width_ratio);
+        if (speed > 0.) {
+            attributes.planned_speed = float(speed);
+        }
+        Domain::Polyline polyline = std::move(path.polyline);
+        path = ExtrusionPath{ std::move(polyline), attributes };
+    }
+}
+
+/**
  * @brief Keeps the pieces of @p src that reach held-up material at both ends.
  *
  * A ring of material round a hole cannot be bridged. The lines that pass beside the hole cross
@@ -612,7 +640,7 @@ void Layer::make_fills(FillAdaptive::Octree* adaptive_fill_octree, FillAdaptive:
             double planned_speed = 0.;
             // Arachne fills carry a width per point, which the planner contract cannot
             // express, so those are left to the stock pattern.
-            if (fill_planner && !params.use_arachne) {
+            if (fill_planner) {
                 const FillPlanner::SurfaceInfo info{
                     extrusion_role_to_gcode_extrusion_role(surface_fill.params.extrusion_role),
                     surface_fill.surface.expolygon,
@@ -623,10 +651,19 @@ void Layer::make_fills(FillAdaptive::Octree* adaptive_fill_octree, FillAdaptive:
                     double(params.density),
                     surface_fill.params.flow.mm3_per_mm(),
                     surface_fill.surface.is_external(),
-                    surface_fill.params.bridge ? double(surface_fill.params.bridge_angle) : -1.
+                    surface_fill.params.bridge ? double(surface_fill.params.bridge_angle) : -1.,
+                    params.use_arachne
                 };
-                FillPlanner::Plan plan = FillPlanner::plan_fill(fill_planner, info, std::move(polylines));
-                polylines             = std::move(plan.paths);
+                // A fill laid with a width per point has no centre lines to hand over, so the
+                // planner is offered none and any it answers with are dropped by the contract.
+                // The flow and the speed it asks for still apply, which is what a strategy
+                // wanting the slicer's own lines printed differently needs.
+                FillPlanner::Plan plan = FillPlanner::plan_fill(
+                    fill_planner, info,
+                    params.use_arachne ? Domain::Polylines{} : std::move(polylines));
+                if (!params.use_arachne) {
+                    polylines = std::move(plan.paths);
+                }
                 planned_flow_ratio    = plan.flow_ratio;
                 planned_speed         = plan.speed;
             }
@@ -672,6 +709,11 @@ void Layer::make_fills(FillAdaptive::Octree* adaptive_fill_octree, FillAdaptive:
                         Flow new_flow = surface_fill.params.flow.with_spacing(float(f->spacing));
 
                         ExtrusionMultiPath multi_path = PerimeterGenerator::thick_polyline_to_multi_path(thick_polyline, surface_fill.params.extrusion_role, new_flow, scaled<float>(0.05), float(SCALED_EPSILON));
+                        // The width of these lines comes from the thick polyline rather than
+                        // from the flow, so a planner's ratio and speed are applied to the
+                        // paths after they are built rather than to the flow behind them.
+                        apply_planned_flow(multi_path, planned_flow_ratio, planned_speed,
+                                           surface_fill.params.bridge);
                         // Append paths to collection.
                         if (!multi_path.empty()) {
                             if (multi_path.paths.front().first_point() == multi_path.paths.back().last_point())
