@@ -3,9 +3,11 @@
 #include <algorithm>
 #include <cassert>
 #include <cinttypes>
+#include <unordered_map>
 
 #include "libslic3r/GCode/ExtrusionFilter.hpp"
 #include "libslic3r/GCode/IslandOrdering.hpp"
+#include "libslic3r/GCode/LoopDirection.hpp"
 #include "libslic3r/GCode/SmoothPath.hpp"
 #include <algorithm>
 
@@ -16,6 +18,8 @@
 #include "libslic3r/ShortestPath.hpp"
 #include "libslic3r/ExtrusionEntity.hpp"
 #include "libslic3r/ExtrusionEntityCollection.hpp"
+#include "Slic3r/Biz/Algorithms/BoundingBox.hpp"
+#include "libslic3r/ClipperUtils.hpp"
 #include "libslic3r/ExtrusionRole.hpp"
 #include "libslic3r/GCode/WipeTowerIntegration.hpp"
 #include "libslic3r/Geometry/ArcWelder.hpp"
@@ -130,6 +134,105 @@ bool keep_smoothed_path(
     };
     return GCode::ExtrusionFilter::keep(print.extrusion_filter, info);
 }
+
+/**
+ * @brief The outline of the layer below, clipped to this island.
+ *
+ * Empty optional on the first layer, where there is no layer below and nothing overhangs -
+ * as against an empty Polygons, which means this island has nothing at all under it.
+ */
+std::optional<Polygons> lower_layer_outline(const Layer &layer, const LayerIsland &island)
+{
+    if (layer.lower_layer == nullptr) {
+        return std::nullopt;
+    }
+    const BoundingBox bbox =
+        Biz::Algorithms::BoundingBox::inflated(get_extents(island.boundary), SCALED_EPSILON);
+    return ClipperUtils::clip_clipper_polygons_with_subject_bbox(layer.lower_layer->lslices, bbox);
+}
+
+/**
+ * @brief How much of @p loop lies outside @p lower, in millimetres.
+ *
+ * Measured against the outline of the layer below with no allowance made for the width of the
+ * bead, which is the same test OrcaSlicer's overhang_reverse makes at its default threshold.
+ * Deliberately not the slicer's own overhang perimeter marking: that compares against the
+ * lower layer grown by half a nozzle, so it says no on any slope the nozzle still partly
+ * overlaps - which on a 31 degree wall at 0.2 mm layers is every layer of it.
+ */
+double length_outside(const ExtrusionLoop &loop, const std::optional<Polygons> &lower)
+{
+    if (!lower.has_value()) {
+        return 0.;
+    }
+    Polylines subject;
+    loop.collect_polylines(subject);
+    double total = 0.;
+    for (const Polyline &outside : diff_pl(subject, *lower)) {
+        total += unscaled<double>(outside.length());
+    }
+    return total;
+}
+
+/** @brief What GCode::LoopDirection has to be told about one wall loop, in millimetres. */
+struct LoopMeasure
+{
+    double length{0.};
+    double overhang_length{0.};
+    bool external{false};
+    int perimeter_index{-1};
+};
+
+LoopMeasure measure_loop(const ExtrusionLoop &loop, const double overhang_length)
+{
+    LoopMeasure measure;
+    measure.overhang_length = overhang_length;
+    for (const ExtrusionPath &path : loop.paths) {
+        measure.length += unscaled<double>(path.length());
+        if (path.role().is_external_perimeter()) {
+            measure.external = true;
+        }
+        if (measure.perimeter_index < 0 && path.attributes().perimeter_index.has_value()) {
+            measure.perimeter_index = int(*path.attributes().perimeter_index);
+        }
+    }
+    return measure;
+}
+
+/**
+ * @brief Wall outside the layer below, per loop and summed over the island, in millimetres.
+ *
+ * Both numbers are wanted - a plugin is offered its loop's own and its island's - and the
+ * island's cannot be had without measuring every loop, so they are measured once, here, and
+ * the per loop answers are kept rather than clipped a second time when each loop comes round.
+ */
+struct IslandOverhang
+{
+    std::unordered_map<const ExtrusionEntity *, double> per_loop;
+    double total{0.};
+};
+
+IslandOverhang measure_island_overhang(
+    const LayerRegion &layerm, const LayerIsland &island, const std::optional<Polygons> &lower
+)
+{
+    IslandOverhang measured;
+    for (uint32_t perimeter_id : island.perimeters) {
+        const auto *eec =
+            dynamic_cast<const ExtrusionEntityCollection *>(layerm.perimeters().entities[perimeter_id]);
+        if (eec == nullptr) {
+            continue;
+        }
+        for (const ExtrusionEntity *ee : *eec) {
+            if (const auto *loop = dynamic_cast<const ExtrusionLoop *>(ee); loop != nullptr) {
+                const double outside = length_outside(*loop, lower);
+                measured.per_loop.emplace(ee, outside);
+                measured.total += outside;
+            }
+        }
+    }
+    return measured;
+}
 } // namespace
 
 std::vector<Perimeter> extract_perimeter_extrusions(
@@ -147,6 +250,15 @@ std::vector<Perimeter> extract_perimeter_extrusions(
     const LayerRegion &layerm = *layer.get_region(island.perimeters.region());
     const PrintRegion &region = print.get_print_region(layerm.region().print_region_id());
 
+    // A plugin may want some of these loops walked the other way round - see
+    // GCode::LoopDirection. How much of the island hangs over air is part of what it is
+    // offered and has to be known before the first loop is answered for, so it is measured up
+    // front. Nothing here runs when no strategy is installed.
+    const LoopDirection::Strategy &loop_direction = print.loop_direction_strategy;
+    const IslandOverhang overhang = loop_direction ?
+        measure_island_overhang(layerm, island, lower_layer_outline(layer, island)) :
+        IslandOverhang{};
+
     for (uint32_t perimeter_id : island.perimeters) {
         // Extrusions inside islands are expected to be ordered already.
         // Don't reorder them.
@@ -163,6 +275,33 @@ std::vector<Perimeter> extract_perimeter_extrusions(
                 if (auto loop = dynamic_cast<const ExtrusionLoop *>(ee)) {
                     const bool is_hole = loop->is_clockwise();
                     reverse_loop = print.config().get<bool>("prefer_clockwise_movements") ? !is_hole : is_hole;
+                    if (loop_direction) {
+                        // The loop is stored clockwise when it is a hole, so this is the
+                        // direction the nozzle would actually travel in.
+                        const bool stock_cw = reverse_loop ? !is_hole : is_hole;
+                        const auto found = overhang.per_loop.find(ee);
+                        const LoopMeasure measure = measure_loop(
+                            *loop, found == overhang.per_loop.end() ? 0. : found->second
+                        );
+                        const LoopDirection::LoopInfo info{
+                            layer.id(),
+                            layer.print_z,
+                            extruder_id,
+                            measure.external,
+                            is_hole,
+                            measure.perimeter_index,
+                            measure.length,
+                            measure.overhang_length,
+                            overhang.total,
+                            stock_cw ? LoopDirection::Direction::Cw : LoopDirection::Direction::Ccw
+                        };
+                        if (const std::optional<LoopDirection::Direction> planned =
+                                LoopDirection::plan_direction(loop_direction, info);
+                            planned.has_value()) {
+                            reverse_loop =
+                                (*planned == LoopDirection::Direction::Cw) != is_hole;
+                        }
+                    }
                 }
                 const std::optional<Point> position_before{previous_position};
                 auto [path, wipe_offset]{smooth_path(&layer, &region, ExtrusionEntityReference{*ee, reverse_loop}, extruder_id, last_position)};

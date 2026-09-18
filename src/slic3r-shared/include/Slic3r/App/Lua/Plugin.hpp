@@ -22,6 +22,7 @@ enum class PluginType
     SlicingIslandSequence,
     SlicingExtrusionFilter,
     SlicingFillPlanner,
+    SlicingLoopDirection,
     SlicingPassPlanner,
     SlicingPerimeterPlanner,
     SlicingResumePlanner,
