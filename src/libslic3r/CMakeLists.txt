@@ -207,6 +207,7 @@ set(SLIC3R_SOURCES
     src/libslic3r/GCode/IslandSequencing.cpp
     src/libslic3r/GCode/LabelObjects.cpp
     src/libslic3r/GCode/LabelObjects.hpp
+    src/libslic3r/GCode/LayerPlanner.cpp
     src/libslic3r/GCode/LoopDirection.cpp
     src/libslic3r/GCode/ModelVisibility.cpp
     src/libslic3r/GCode/ModelVisibility.hpp
@@ -431,6 +432,7 @@ set(SLIC3R_PUBLIC_HEADERS
     include/libslic3r/GCode/ExtrusionFilter.hpp
     include/libslic3r/GCode/IslandOrdering.hpp
     include/libslic3r/GCode/IslandSequencing.hpp
+    include/libslic3r/GCode/LayerPlanner.hpp
     include/libslic3r/GCode/LoopDirection.hpp
     include/libslic3r/GCode/ObjectLabels.hpp
     include/libslic3r/GeneratedSupportPoints.hpp

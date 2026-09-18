@@ -11,6 +11,7 @@
 #include "Slic3r/App/Lua/FillPlannerPlugin.hpp"
 #include "Slic3r/App/Lua/IslandOrderPlugin.hpp"
 #include "Slic3r/App/Lua/IslandSequencePlugin.hpp"
+#include "Slic3r/App/Lua/LayerPlannerPlugin.hpp"
 #include "Slic3r/App/Lua/LoopDirectionPlugin.hpp"
 #include "Slic3r/App/Lua/ObjectLabelsPlugin.hpp"
 #include "Slic3r/App/Lua/PassPlannerPlugin.hpp"
@@ -288,6 +289,11 @@ void BackgroundProcess::slice(
                 // from the bottom up chamfers the overhangs the printer would otherwise have
                 // to lay onto air.
                 print->slice_planner = App::Lua::make_slice_planner(
+                    {resources_dir() + "/lua", data_dir() + "/lua"}
+                );
+                // Or decide the order a layer's groups of extrusion are printed in, so the
+                // wall of a part is not laid straight after the mass of solid beside it.
+                print->layer_planner = App::Lua::make_layer_planner(
                     {resources_dir() + "/lua", data_dir() + "/lua"}
                 );
                 // Or decide which way round each wall loop is walked, so that a wall over
