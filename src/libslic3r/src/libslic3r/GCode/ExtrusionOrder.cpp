@@ -3,10 +3,13 @@
 #include <algorithm>
 #include <cassert>
 #include <cinttypes>
+#include <map>
+#include <ranges>
 #include <unordered_map>
 
 #include "libslic3r/GCode/ExtrusionFilter.hpp"
 #include "libslic3r/GCode/IslandOrdering.hpp"
+#include "libslic3r/GCode/LayerPlanner.hpp"
 #include "libslic3r/GCode/LoopDirection.hpp"
 #include "libslic3r/GCode/SmoothPath.hpp"
 #include <algorithm>
@@ -336,21 +339,40 @@ std::vector<ExtrusionEntityReference> sort_fill_extrusions(const ExtrusionEntiti
     return sorted_extrusions;
 }
 
-std::vector<InfillRange> extract_infill_ranges(
+/** @brief One run of an island's fill: the ranges of it that belong to one region. */
+struct FillRun
+{
+    LayerExtrusionRanges::const_iterator begin;
+    LayerExtrusionRanges::const_iterator end;
+};
+
+/** @brief Splits an island's fill into the runs the slicer prints one after another. */
+std::vector<FillRun> fill_runs(const LayerIsland &island)
+{
+    std::vector<FillRun> runs;
+    for (auto it = island.fills.begin(); it != island.fills.end();) {
+        auto it_end = it;
+        for (++ it_end; it_end != island.fills.end() && it->region() == it_end->region(); ++ it_end) ;
+        runs.push_back(FillRun{it, it_end});
+        it = it_end;
+    }
+    return runs;
+}
+
+/** @brief Collects, sorts and smooths one run of fill. Nothing when none of it is printed. */
+std::optional<InfillRange> extract_fill_run(
     const Print &print,
     const Layer &layer,
-    const LayerIsland &island,
+    const FillRun &run,
     const Point &offset,
     std::optional<Point> &previous_position,
     const ExtractEntityPredicate &should_pick_extrusion,
     const PathSmoothingFunction &smooth_path,
     const unsigned extruder_id
 ) {
-    std::vector<InfillRange> result;
-    for (auto it = island.fills.begin(); it != island.fills.end();) {
-        // Gather range of fill ranges with the same region.
-        auto it_end = it;
-        for (++ it_end; it_end != island.fills.end() && it->region() == it_end->region(); ++ it_end) ;
+    {
+        const auto it = run.begin;
+        const auto it_end = run.end;
         const LayerRegion &layerm = *layer.get_region(it->region());
         // PrintObjects own the PrintRegions, thus the pointer to PrintRegion would be unique to a PrintObject, they would not
         // identify the content of PrintRegion accross the whole print uniquely. Translate to a Print specific PrintRegion.
@@ -383,9 +405,29 @@ std::vector<InfillRange> extract_infill_ranges(
             previous_position = get_gcode_point(last_position, offset);
         }
         if (!paths.empty()) {
-            result.push_back({std::move(paths), &region});
+            return InfillRange{std::move(paths), &region};
         }
-        it = it_end;
+    }
+    return std::nullopt;
+}
+
+std::vector<InfillRange> extract_infill_ranges(
+    const Print &print,
+    const Layer &layer,
+    const LayerIsland &island,
+    const Point &offset,
+    std::optional<Point> &previous_position,
+    const ExtractEntityPredicate &should_pick_extrusion,
+    const PathSmoothingFunction &smooth_path,
+    const unsigned extruder_id
+) {
+    std::vector<InfillRange> result;
+    for (const FillRun &run : fill_runs(island)) {
+        if (std::optional<InfillRange> range = extract_fill_run(
+                print, layer, run, offset, previous_position, should_pick_extrusion, smooth_path,
+                extruder_id)) {
+            result.push_back(std::move(*range));
+        }
     }
     return result;
 }
@@ -404,6 +446,202 @@ std::vector<std::reference_wrapper<const LayerIsland>> get_ordered_islands(
     return islands_to_order;
 }
 
+/** @brief Sums what a set of extrusions is, for a plugin that has to choose between them. */
+void describe_entity(
+    const ExtrusionEntity *entity, const Point &offset, LayerPlanner::GroupInfo &into,
+    std::map<Domain::GCodeExtrusionRole, LayerPlanner::RoleShare> &by_role, Points &points)
+{
+    if (entity == nullptr) {
+        return;
+    }
+    // A collection has no length and no single role of its own - it is asked about its
+    // children, which is what the G-code writer does with it as well.
+    if (const auto *collection = dynamic_cast<const ExtrusionEntityCollection *>(entity)) {
+        for (const ExtrusionEntity *child : collection->entities) {
+            describe_entity(child, offset, into, by_role, points);
+        }
+        return;
+    }
+
+    Polylines polylines;
+    entity->collect_polylines(polylines);
+    double length = 0.;
+    for (const Polyline &polyline : polylines) {
+        length += unscaled<double>(polyline.length());
+        for (const Point &point : polyline.points) {
+            points.emplace_back(point + offset);
+        }
+    }
+    if (length <= 0.) {
+        return;
+    }
+    const double volume = entity->total_volume();
+    into.length += length;
+    into.volume += volume;
+
+    const Domain::GCodeExtrusionRole role = extrusion_role_to_gcode_extrusion_role(entity->role());
+    LayerPlanner::RoleShare &share =
+        by_role.try_emplace(role, LayerPlanner::RoleShare{role, 0., 0.}).first->second;
+    share.length += length;
+    share.volume += volume;
+}
+
+/**
+ * @brief Describes a set of extrusions as one group, breakdown by role included.
+ *
+ * The group is left with its shares sorted longest first, so that the dominant role is simply
+ * the first of them and a plugin reading the list in order reads it in the order that matters.
+ */
+void describe_entities(
+    const ExtrusionEntitiesPtr &entities, const Point &offset, LayerPlanner::GroupInfo &into)
+{
+    Points points;
+    std::map<Domain::GCodeExtrusionRole, LayerPlanner::RoleShare> by_role;
+    for (const ExtrusionEntity *entity : entities) {
+        describe_entity(entity, offset, into, by_role, points);
+    }
+    if (!points.empty()) {
+        into.bbox = Biz::Algorithms::BoundingBox::construct(points);
+    }
+
+    into.roles.reserve(by_role.size());
+    for (const auto &share : by_role | std::views::values) {
+        into.roles.push_back(share);
+    }
+    std::sort(
+        into.roles.begin(), into.roles.end(),
+        [](const LayerPlanner::RoleShare &a, const LayerPlanner::RoleShare &b) {
+            return a.length > b.length;
+        }
+    );
+    into.role = into.roles.empty() ? Domain::GCodeExtrusionRole::None : into.roles.front().role;
+}
+
+/** @brief One group of a layer slice, and where its extrusions are to be found. */
+struct PlannedGroup
+{
+    std::size_t island;
+    bool perimeters;
+    /** @brief Which run of the island's fill, when this is a fill group. */
+    std::size_t run;
+};
+
+/**
+ * @brief Collects a layer slice's extrusions in the order a LayerPlanner asked for.
+ *
+ * Empty when there is nothing to plan or the planner leaves the order alone, and then the
+ * caller collects them the way it always did - which is what makes the stock G-code with no
+ * plugin installed structurally identical rather than merely equal.
+ *
+ * Each group becomes its own entry: the G-code writer prints whichever half of an entry is not
+ * empty, so a group of walls and a group of fill can be put anywhere in the sequence, including
+ * between two groups of another island.
+ */
+std::vector<IslandExtrusions> extract_in_planned_order(
+    const std::vector<std::reference_wrapper<const LayerIsland>> &ordered_islands,
+    const Print &print,
+    const Layer &layer,
+    const ExtractEntityPredicate &should_pick_extrusion,
+    const PathSmoothingFunction &smooth_path,
+    const Point &offset,
+    const unsigned extruder_id,
+    std::optional<Point> &previous_position
+) {
+    const auto should_pick_infill = [&should_pick_extrusion](const ExtrusionEntityCollection &eec, const PrintRegion &region) {
+        return should_pick_extrusion(eec, region) && eec.role() != ExtrusionRole::Ironing;
+    };
+
+    std::vector<LayerPlanner::GroupInfo> groups;
+    std::vector<PlannedGroup> plan;
+    std::vector<std::vector<FillRun>> runs_of_island;
+    runs_of_island.reserve(ordered_islands.size());
+
+    for (std::size_t i = 0; i < ordered_islands.size(); ++i) {
+        const LayerIsland &island = ordered_islands[i].get();
+        const LayerRegion &layerm = *layer.get_region(island.perimeters.region());
+        const PrintRegion &region = print.get_print_region(layerm.region().print_region_id());
+
+        {
+            ExtrusionEntitiesPtr walls;
+            for (uint32_t perimeter_id : island.perimeters) {
+                auto *eec = dynamic_cast<ExtrusionEntityCollection *>(layerm.perimeters().entities[perimeter_id]);
+                if (eec == nullptr || eec->empty() || !should_pick_extrusion(*eec, region)) {
+                    continue;
+                }
+                for (ExtrusionEntity *entity : *eec) {
+                    if (entity != nullptr) {
+                        walls.emplace_back(entity);
+                    }
+                }
+            }
+            LayerPlanner::GroupInfo info{i, LayerPlanner::GroupKind::Perimeters,
+                                         Domain::GCodeExtrusionRole::None, 0., 0., BoundingBox{}};
+            describe_entities(walls, offset, info);
+            if (info.length > 0.) {
+                groups.push_back(std::move(info));
+                plan.push_back(PlannedGroup{i, true, 0});
+            }
+        }
+
+        runs_of_island.push_back(fill_runs(island));
+        const std::vector<FillRun> &runs = runs_of_island.back();
+        for (std::size_t r = 0; r < runs.size(); ++r) {
+            const LayerRegion &fill_layerm = *layer.get_region(runs[r].begin->region());
+            const PrintRegion &fill_region =
+                print.get_print_region(fill_layerm.region().print_region_id());
+            const ExtrusionEntitiesPtr fills{extract_infill_extrusions(
+                fill_region, fill_layerm.fills(), runs[r].begin, runs[r].end, should_pick_infill)};
+            LayerPlanner::GroupInfo info{i, LayerPlanner::GroupKind::Fill,
+                                         Domain::GCodeExtrusionRole::None, 0., 0., BoundingBox{}};
+            describe_entities(fills, offset, info);
+            if (info.length > 0.) {
+                groups.push_back(std::move(info));
+                plan.push_back(PlannedGroup{i, false, r});
+            }
+        }
+    }
+
+    if (groups.size() < 2) {
+        return {};
+    }
+
+    const LayerPlanner::LayerContext context{layer.id(), layer.print_z, extruder_id};
+    const std::vector<std::size_t> order =
+        LayerPlanner::order_groups(print.layer_planner, groups, context);
+    bool unchanged = true;
+    for (std::size_t i = 0; i < order.size() && unchanged; ++i) {
+        unchanged = order[i] == i;
+    }
+    if (unchanged) {
+        return {};
+    }
+
+    std::vector<IslandExtrusions> result;
+    result.reserve(order.size());
+    for (const std::size_t position : order) {
+        const PlannedGroup &group = plan[position];
+        const LayerIsland &island = ordered_islands[group.island].get();
+        if (group.perimeters) {
+            const LayerRegion &layerm = *layer.get_region(island.perimeters.region());
+            const PrintRegion &region = print.get_print_region(layerm.region().print_region_id());
+            std::vector<Perimeter> perimeters{extract_perimeter_extrusions(
+                print, layer, island, should_pick_extrusion, extruder_id, offset,
+                previous_position, smooth_path)};
+            if (!perimeters.empty()) {
+                result.push_back(IslandExtrusions{&region, std::move(perimeters), {}, false});
+            }
+        } else if (std::optional<InfillRange> range = extract_fill_run(
+                       print, layer, runs_of_island[group.island][group.run], offset,
+                       previous_position, should_pick_infill, smooth_path, extruder_id)) {
+            const PrintRegion *region = range->region;
+            std::vector<InfillRange> ranges;
+            ranges.push_back(std::move(*range));
+            result.push_back(IslandExtrusions{region, {}, std::move(ranges), true});
+        }
+    }
+    return result;
+}
+
 std::vector<IslandExtrusions> extract_island_extrusions(
     const LayerSlice &lslice,
     const Print &print,
@@ -420,6 +658,19 @@ std::vector<IslandExtrusions> extract_island_extrusions(
     };
 
     std::vector<std::reference_wrapper<const LayerIsland>> ordered_islands = get_ordered_islands(lslice, previous_position);
+
+    // A plugin may want these groups printed in some other order - the deck of a hull before
+    // the wall that runs past it, say. Described and asked before anything is collected,
+    // because collecting advances the head and every seam and travel after it follows from
+    // where the head is.
+    if (print.layer_planner) {
+        if (std::vector<IslandExtrusions> planned = extract_in_planned_order(
+                ordered_islands, print, layer, should_pick_extrusion, smooth_path, offset,
+                extruder_id, previous_position);
+            !planned.empty()) {
+            return planned;
+        }
+    }
 
     std::vector<IslandExtrusions> result;
     for (const LayerIsland &island : ordered_islands) {
