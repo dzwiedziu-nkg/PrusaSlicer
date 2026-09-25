@@ -1,18 +1,17 @@
 # Building and running this fork
 
-This is a fork of PrusaSlicer `3.0.0-alpha11` that adds **slicing plugin hooks** — five
+This is a fork of PrusaSlicer `3.0.0-alpha12` that adds **slicing plugin hooks** — eleven
 extension points that let a Lua plugin influence slicing itself, which the released
 plugin system cannot do.
 
-**Build `main`.** It carries every hook, so every plugin below works. The `pr*` branches
-carry one hook each and are there to be read, not to be run. See `doc/Plugin_API.md` for the
-API and the plugins that use it:
+**Build `main`.** It carries every hook, so every plugin works. The `pr*` branches carry one
+hook each, are still on `3.0.0-alpha11`, and are there to be read, not to be run. See
+`doc/Plugin_API.md` for the API.
 
-- [island-order-plugin](https://github.com/dzwiedziu-nkg/island-order-plugin) — the print order of a layer's islands
-- [short-extrusion-plugin](https://github.com/dzwiedziu-nkg/short-extrusion-plugin) — drops extrusions not worth the travel to reach them
-- [sequential-islands-plugin](https://github.com/dzwiedziu-nkg/sequential-islands-plugin) — prints an object's upper branches one at a time
-- [radial-bridge-plugin](https://github.com/dzwiedziu-nkg/radial-bridge-plugin) — runs bridges over annular gaps as spokes
-- [wipe-tower-cancel-plugin](https://github.com/dzwiedziu-nkg/wipe-tower-cancel-plugin) — lets the printer cancel the wipe tower mid print
+The plugins live in one repository,
+**[PrusaSlicer3-plugins](https://github.com/dzwiedziu-nkg/PrusaSlicer3-plugins)**, one
+directory each; its README lists them with the hook each one uses. The five single-plugin
+repositories that came before it are superseded by it.
 
 `doc/Build.md` is upstream's build guide and still applies. This file adds the parts that
 are specific to this fork, and the one thing upstream leaves out: **where the built
@@ -24,12 +23,13 @@ Mint 22.x is built on Ubuntu 24.04 "noble", so the packages upstream lists work 
 are. This exact set is what the fork is built with on Mint 22.1:
 
 ```bash
-sudo apt install git build-essential autoconf cmake ninja-build \
+sudo apt install git build-essential autoconf cmake libtool ninja-build \
     libglu1-mesa-dev libgtk-3-dev libdbus-1-dev libwebkit2gtk-4.1-dev texinfo
 ```
 
-`ninja-build` is optional; `make` is used by default. Nothing else was needed — no PPA, no
-manually installed library.
+`ninja-build` is optional; `make` is used by default. `libtool` is in upstream's list since
+`3.0.0-alpha12`: the MPFR dependency runs `autoreconf`, which fails without `libtoolize`.
+Nothing else was needed — no PPA, no manually installed library.
 
 ## 2. Build the dependencies — once, and it is slow
 
@@ -58,7 +58,8 @@ cmake .. -DCMAKE_BUILD_TYPE=Release -DSLIC3R_STATIC=ON \
 cmake --build . -j "$(nproc)"
 ```
 
-About 15 minutes cold on 16 threads, a few minutes for an incremental rebuild.
+About 25 minutes cold on 16 threads (measured on the move to `3.0.0-alpha12`, which rebuilt
+everything), a few minutes for an incremental rebuild.
 
 Optional, and worth it after changing anything in the engine:
 
@@ -140,7 +141,7 @@ Plugins are bundle directories under `lua/` there, and **the directory name must
 checkout:
 
 ```bash
-ln -s ~/projects/island-order-plugin/com.github.dzwiedziu-nkg.island-order \
+ln -s ~/projects/PrusaSlicer3-plugins/island-order/com.github.dzwiedziu-nkg.island-order \
       ~/.config/PrusaSlicer3-dev/lua/
 ```
 
