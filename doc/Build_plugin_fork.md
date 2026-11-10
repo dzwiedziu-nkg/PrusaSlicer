@@ -1,8 +1,10 @@
 # Building and running this fork
 
-This is a fork of PrusaSlicer `3.0.0-alpha12` that adds **slicing plugin hooks** — eleven
+This is a fork of PrusaSlicer `3.0.0-alpha14` that adds **slicing plugin hooks** — eleven
 extension points that let a Lua plugin influence slicing itself, which the released
-plugin system cannot do.
+plugin system cannot do. Stock `3.0.0-alpha13` and later run two kinds of Lua plugin,
+`project.plugin` (invoked from the Plugins menu) and `print.print_mode` (a *Print Goal*,
+which returns a table of print setting overrides); neither reaches into slicing.
 
 **Build `main`.** It carries every hook, so every plugin works. The `pr*` branches carry one
 hook each, are still on `3.0.0-alpha11`, and are there to be read, not to be run. See
@@ -24,12 +26,15 @@ are. This exact set is what the fork is built with on Mint 22.1:
 
 ```bash
 sudo apt install git build-essential autoconf cmake libtool ninja-build \
-    libglu1-mesa-dev libgtk-3-dev libdbus-1-dev libwebkit2gtk-4.1-dev texinfo
+    libglu1-mesa-dev libgtk-3-dev libdbus-1-dev libwebkit2gtk-4.1-dev libhidapi-dev texinfo
 ```
 
 `ninja-build` is optional; `make` is used by default. `libtool` is in upstream's list since
 `3.0.0-alpha12`: the MPFR dependency runs `autoreconf`, which fails without `libtoolize`.
-Nothing else was needed — no PPA, no manually installed library.
+`libhidapi-dev` is in it since `3.0.0-alpha13`, which reads a 3D mouse through it: on Linux
+the dependency build does not build hidapi, it expects the system library (found through
+`pkg-config`, so a hidapi built into the deps prefix works too). Nothing else was needed — no
+PPA, no manually installed library.
 
 ## 2. Build the dependencies — once, and it is slow
 
@@ -46,6 +51,13 @@ building again, the first run did not finish and the next step will fail confusi
 The result lands in `deps/build/destdir`. **Do not move or copy that directory** — dozens
 of files inside it hold absolute paths, so it only works where it was built. If you have
 built the same dependency set elsewhere, point at it in place instead of rebuilding.
+
+If that set is from `3.0.0-alpha12` or earlier, it is missing what `3.0.0-alpha13` added:
+the material database (`<prefix>/share/matdb/matdb.zip`, a plain download — the slicer's
+CMake refuses to configure without it), Paho MQTT C and C++ (`find_package(PahoMqttCpp)` is
+required), and `libspnav` (Linux, optional). libbgcode also moved to `167c8e1` (MeatPack
+fixes). Building only those targets in `deps/build` — `dep_matdb`, `dep_Paho`, `dep_Pahocpp`,
+`dep_LibBGCode` — is far cheaper than a full rebuild.
 
 ## 3. Build the slicer
 
@@ -144,6 +156,9 @@ checkout:
 ln -s ~/projects/PrusaSlicer3-plugins/island-order/com.github.dzwiedziu-nkg.island-order \
       ~/.config/PrusaSlicer3-dev/lua/
 ```
+
+The plugin repository's `plugin-launcher.py` does this from a window: a checkbox per plugin,
+then it links the ticked ones, unlinks the others and starts the fork.
 
 Editing a plugin's `.lua` or its `settings.lua` takes effect **on the next slice** — no
 restart, no rescan. To disable one, remove the symlink.
