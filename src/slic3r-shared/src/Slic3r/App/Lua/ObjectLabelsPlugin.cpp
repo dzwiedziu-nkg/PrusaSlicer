@@ -117,7 +117,7 @@ public:
         }
 
         const sol::object returned = result;
-        if (returned.get_type() == sol::type::nil) {
+        if (returned.get_type() == sol::type::lua_nil) {
             // The plugin does not want this part of the print named.
             return std::nullopt;
         }

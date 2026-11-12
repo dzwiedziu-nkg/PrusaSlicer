@@ -120,7 +120,7 @@ public:
         }
 
         const sol::object returned = result;
-        if (returned.get_type() == sol::type::nil) {
+        if (returned.get_type() == sol::type::lua_nil) {
             // The plugin did not want anything done about this interruption.
             return std::nullopt;
         }
@@ -136,7 +136,7 @@ public:
 
         const sol::table answer = returned.as<sol::table>();
         const sol::object purge = answer["purge_volume"];
-        if (purge.get_type() == sol::type::none || purge.get_type() == sol::type::nil) {
+        if (purge.get_type() == sol::type::none || purge.get_type() == sol::type::lua_nil) {
             // A table that says nothing about purging asks for nothing.
             return std::nullopt;
         }

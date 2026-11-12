@@ -115,7 +115,7 @@ public:
         }
 
         const sol::object returned = result;
-        if (returned.get_type() == sol::type::nil) {
+        if (returned.get_type() == sol::type::lua_nil) {
             // The plugin was happy with the direction the slicer picked.
             return std::nullopt;
         }
@@ -124,7 +124,7 @@ public:
         sol::object named = returned;
         if (returned.get_type() == sol::type::table) {
             named = returned.as<sol::table>()["direction"];
-            if (named.get_type() == sol::type::none || named.get_type() == sol::type::nil) {
+            if (named.get_type() == sol::type::none || named.get_type() == sol::type::lua_nil) {
                 // A table that says nothing about the direction asks for no change.
                 return std::nullopt;
             }

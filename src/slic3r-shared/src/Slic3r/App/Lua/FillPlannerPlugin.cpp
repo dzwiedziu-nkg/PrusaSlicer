@@ -170,7 +170,7 @@ public:
         }
 
         const sol::object returned = result;
-        if (returned.get_type() == sol::type::nil) {
+        if (returned.get_type() == sol::type::lua_nil) {
             // The plugin had no opinion about this surface.
             return std::nullopt;
         }
@@ -202,11 +202,11 @@ private:
     {
         const sol::object paths_field = answer["paths"];
         const bool names_paths = paths_field.get_type() != sol::type::none
-            && paths_field.get_type() != sol::type::nil;
+            && paths_field.get_type() != sol::type::lua_nil;
         const bool names_flow = answer["flow_ratio"].get_type() != sol::type::none
-            && answer["flow_ratio"].get_type() != sol::type::nil;
+            && answer["flow_ratio"].get_type() != sol::type::lua_nil;
         const bool names_speed = answer["speed"].get_type() != sol::type::none
-            && answer["speed"].get_type() != sol::type::nil;
+            && answer["speed"].get_type() != sol::type::lua_nil;
 
         std::optional<Domain::Polylines> paths;
         if (names_paths) {
@@ -229,7 +229,7 @@ private:
 
         double flow_ratio = 1.;
         const sol::object ratio = answer["flow_ratio"];
-        if (ratio.get_type() != sol::type::none && ratio.get_type() != sol::type::nil) {
+        if (ratio.get_type() != sol::type::none && ratio.get_type() != sol::type::lua_nil) {
             if (ratio.get_type() != sol::type::number) {
                 return std::nullopt;
             }
@@ -238,7 +238,7 @@ private:
 
         double speed = 0.;
         const sol::object wanted = answer["speed"];
-        if (wanted.get_type() != sol::type::none && wanted.get_type() != sol::type::nil) {
+        if (wanted.get_type() != sol::type::none && wanted.get_type() != sol::type::lua_nil) {
             if (wanted.get_type() != sol::type::number) {
                 return std::nullopt;
             }

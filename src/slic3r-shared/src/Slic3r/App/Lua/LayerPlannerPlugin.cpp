@@ -139,7 +139,7 @@ public:
         }
 
         const sol::object returned = result;
-        if (returned.get_type() == sol::type::nil) {
+        if (returned.get_type() == sol::type::lua_nil) {
             // The plugin was happy with the order the slicer chose.
             return stock_order(groups.size());
         }

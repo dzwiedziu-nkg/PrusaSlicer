@@ -171,7 +171,7 @@ public:
         }
 
         const sol::object returned = result;
-        if (returned.get_type() == sol::type::nil) {
+        if (returned.get_type() == sol::type::lua_nil) {
             // The plugin did not want an extra pass over this area.
             return std::nullopt;
         }
@@ -203,7 +203,7 @@ private:
     {
         const sol::object paths_field = answer["paths"];
         if (paths_field.get_type() == sol::type::none
-            || paths_field.get_type() == sol::type::nil) {
+            || paths_field.get_type() == sol::type::lua_nil) {
             std::optional<Domain::Polylines> paths = to_polylines(answer);
             if (!paths.has_value()) {
                 return std::nullopt;
@@ -221,7 +221,7 @@ private:
 
         PassPlanner::Plan plan{std::move(*paths)};
         const sol::object spacing = answer["spacing"];
-        if (spacing.get_type() != sol::type::none && spacing.get_type() != sol::type::nil) {
+        if (spacing.get_type() != sol::type::none && spacing.get_type() != sol::type::lua_nil) {
             if (spacing.get_type() != sol::type::number) {
                 return std::nullopt;
             }
@@ -229,7 +229,7 @@ private:
         }
 
         const sol::object ratio = answer["flow_ratio"];
-        if (ratio.get_type() != sol::type::none && ratio.get_type() != sol::type::nil) {
+        if (ratio.get_type() != sol::type::none && ratio.get_type() != sol::type::lua_nil) {
             if (ratio.get_type() != sol::type::number) {
                 return std::nullopt;
             }
@@ -237,7 +237,7 @@ private:
         }
 
         const sol::object run_time = answer["max_run_time"];
-        if (run_time.get_type() != sol::type::none && run_time.get_type() != sol::type::nil) {
+        if (run_time.get_type() != sol::type::none && run_time.get_type() != sol::type::lua_nil) {
             if (run_time.get_type() != sol::type::number) {
                 return std::nullopt;
             }
@@ -245,7 +245,7 @@ private:
         }
 
         const sol::object purge = answer["purge_volume"];
-        if (purge.get_type() != sol::type::none && purge.get_type() != sol::type::nil) {
+        if (purge.get_type() != sol::type::none && purge.get_type() != sol::type::lua_nil) {
             if (purge.get_type() != sol::type::number) {
                 return std::nullopt;
             }

@@ -106,7 +106,7 @@ public:
         }
 
         const sol::object returned = result;
-        if (returned.get_type() == sol::type::nil) {
+        if (returned.get_type() == sol::type::lua_nil) {
             // The plugin was happy with the count the settings ask for.
             return std::nullopt;
         }
@@ -125,7 +125,7 @@ public:
         bool said_something = false;
 
         const sol::object count = answer["perimeters"];
-        if (count.get_type() != sol::type::none && count.get_type() != sol::type::nil) {
+        if (count.get_type() != sol::type::none && count.get_type() != sol::type::lua_nil) {
             if (count.get_type() != sol::type::number) {
                 disable("plan_perimeters() answered with a perimeters that is not a number");
                 return std::nullopt;
@@ -135,7 +135,7 @@ public:
         }
 
         const sol::object unsupported = answer["unsupported"];
-        if (unsupported.get_type() != sol::type::none && unsupported.get_type() != sol::type::nil) {
+        if (unsupported.get_type() != sol::type::none && unsupported.get_type() != sol::type::lua_nil) {
             if (unsupported.get_type() != sol::type::string) {
                 disable("plan_perimeters() answered with an unsupported that is not a string");
                 return std::nullopt;
@@ -160,7 +160,7 @@ public:
                  std::pair<const char*, double*>{"unsupported_anchor", &plan.unsupported_anchor},
                  std::pair<const char*, double*>{"min_unsupported", &plan.min_unsupported}}) {
             const sol::object given = answer[key];
-            if (given.get_type() == sol::type::none || given.get_type() == sol::type::nil) {
+            if (given.get_type() == sol::type::none || given.get_type() == sol::type::lua_nil) {
                 continue;
             }
             if (given.get_type() != sol::type::number) {

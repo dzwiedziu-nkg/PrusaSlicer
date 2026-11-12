@@ -112,7 +112,7 @@ public:
     {
         remedy_out = Remedy::Clip;
         const sol::object growth = answer["max_overhang"];
-        if (growth.get_type() == sol::type::none || growth.get_type() == sol::type::nil) {
+        if (growth.get_type() == sol::type::none || growth.get_type() == sol::type::lua_nil) {
             // A table that says nothing about the growth asks for no bound. Rewriting the
             // outline is destructive, so it happens only when a plugin asks in so many words.
             return std::nullopt;
@@ -124,7 +124,7 @@ public:
 
         SlicePlanner::Plan plan{growth.as<double>()};
         const sol::object width = answer["max_overhang_width"];
-        if (width.get_type() != sol::type::none && width.get_type() != sol::type::nil) {
+        if (width.get_type() != sol::type::none && width.get_type() != sol::type::lua_nil) {
             if (width.get_type() != sol::type::number) {
                 disable("plan_slice() answered with a max_overhang_width that is not a number");
                 return std::nullopt;
@@ -133,7 +133,7 @@ public:
         }
 
         const sol::object remedy = answer["remedy"];
-        if (remedy.get_type() != sol::type::none && remedy.get_type() != sol::type::nil) {
+        if (remedy.get_type() != sol::type::none && remedy.get_type() != sol::type::lua_nil) {
             if (remedy.get_type() != sol::type::string) {
                 disable("plan_slice() answered with a remedy that is not a string");
                 return std::nullopt;
@@ -187,7 +187,7 @@ public:
         }
 
         const sol::object returned = result;
-        if (returned.get_type() == sol::type::nil) {
+        if (returned.get_type() == sol::type::lua_nil) {
             // The plugin was happy with the outline the mesh gave.
             return {};
         }
